@@ -11,6 +11,7 @@ from swift.utils import get_logger
 
 logger = get_logger()
 
+# pt：对齐   SFT：微调     rlhf：强化学习的都在里面
 ROUTE_MAPPING: Dict[str, str] = {
     'pt': 'swift.cli.pt',
     'sft': 'swift.cli.sft',
