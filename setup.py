@@ -4,6 +4,8 @@ import os
 from setuptools import find_packages, setup
 from typing import List
 
+from tests.run import print_table_result
+
 
 def readme():
     with open('README.md', encoding='utf-8') as f:
@@ -128,6 +130,8 @@ if __name__ == '__main__':
     all_requires.extend(extra_requires['ray'])
     extra_requires['all'] = all_requires
 
+    print("gitgit")
+
     setup(
         name='ms_swift',
         version=get_version(),
@@ -162,3 +166,6 @@ if __name__ == '__main__':
         },
         dependency_links=deps_link,
         zip_safe=False)
+
+
+
