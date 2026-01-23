@@ -95,11 +95,11 @@ def cli_main(route_mapping: Optional[Dict[str, str]] = None, is_megatron: bool =
     route_mapping = route_mapping or ROUTE_MAPPING
     argv = sys.argv[1:]
     _compat_web_ui(argv)
-    method_name = argv[0].replace('_', '-')
+    method_name = argv[0].replace('_', '-')     # 运行方法  pt/SFT/RLHF
     argv = argv[1:]
     file_path = importlib.util.find_spec(route_mapping[method_name]).origin
-    torchrun_args = get_torchrun_args()
-    prepare_config_args(argv)
+    torchrun_args = get_torchrun_args()                     # 分布式参数
+    prepare_config_args(argv)                               # 处理yaml中的参数
     python_cmd = sys.executable
     if torchrun_args is None or (not is_megatron and method_name not in {'pt', 'sft', 'rlhf', 'infer'}):
         args = [python_cmd, file_path, *argv]
