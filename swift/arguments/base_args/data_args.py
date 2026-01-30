@@ -104,7 +104,7 @@ class DataArguments:
             register_dataset_info(path)
 
     def __post_init__(self):
-        self.columns = json_parse_to_dict(self.columns)
+        self.columns = json_parse_to_dict(self.columns)             # 对话数据 键的映射
         if len(self.val_dataset) > 0 or self.streaming and self.split_dataset_ratio > 0:
             self.split_dataset_ratio = 0.
             if len(self.val_dataset) > 0:
@@ -113,7 +113,7 @@ class DataArguments:
                 msg = 'args.streaming is True'
             logger.info(f'Because {msg}, setting split_dataset_ratio: {self.split_dataset_ratio}')
         self._init_custom_dataset_info()
-        if isinstance(self.cached_dataset, str):
+        if isinstance(self.cached_dataset, str):                    # 缓存数据集
             self.cached_dataset = [self.cached_dataset]
         self._init_val_dataset_exists()
 

@@ -196,6 +196,7 @@ class ModelArguments:
         self.num_labels = self.model_info.num_labels
 
         self.model_dir = self.model_info.model_dir
+        # 注意自建模型的model type
         self.model_type = self.model_info.model_type
         if self.rope_scaling or self.model_info.rope_scaling and self.max_model_len is not None:
             self._init_rope_scaling()
@@ -218,7 +219,7 @@ class ModelArguments:
     def __post_init__(self):
         if self.model is None:
             raise ValueError(f'Please set --model <model_id_or_path>`, model: {self.model}')
-        self._init_new_special_tokens()
+        self._init_new_special_tokens()                     # 添加用户设置的特殊token
         self.model_suffix = get_model_name(self.model)
         self._init_device_map()
         self._init_max_memory()

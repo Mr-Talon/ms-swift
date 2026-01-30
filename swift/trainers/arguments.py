@@ -236,17 +236,22 @@ class TrainArgumentsMixin:
             raise ValueError('liger_kernel does not support device_map. '
                              'Please use DDP/DeepSpeed for multi-GPU training.')
 
+        # 优化器
         if self.optimizer is None and (self.vit_lr is not None or self.aligner_lr is not None):
             self.optimizer = 'multimodal'
         self._init_callbacks()
+        # 梯度累计 模拟大batch
         if self.gradient_accumulation_steps is None:
             world_size = get_dist_setting()[2]
             self.gradient_accumulation_steps = max(1, math.ceil(16 / self.per_device_train_batch_size / world_size))
             logger.info(f'Setting args.gradient_accumulation_steps: {self.gradient_accumulation_steps}')
+        # lr调整
         if self.lr_scheduler_kwargs:
             self.lr_scheduler_kwargs = json_parse_to_dict(self.lr_scheduler_kwargs)
+        # 结果记录
         if 'wandb' in self.report_to:
             os.environ.setdefault('WANDB_PROJECT', 'ms-swift')
+        # 视觉编码器 节省前向显存 耗时  默认True
         if self.vit_gradient_checkpointing is None:
             self.vit_gradient_checkpointing = self.gradient_checkpointing
         if self.gradient_checkpointing_kwargs:
@@ -258,6 +263,7 @@ class TrainArgumentsMixin:
             else:
                 self.dataloader_num_workers = 1
             logger.info(f'Setting args.dataloader_num_workers: {self.dataloader_num_workers}')
+        # dataloader预加载
         if self.dataloader_prefetch_factor is None and self.dataloader_num_workers > 0:
             self.dataloader_prefetch_factor = 2
         if self.eval_use_evalscope:

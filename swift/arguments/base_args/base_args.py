@@ -156,7 +156,7 @@ class BaseArguments(GenerationArguments, QuantizeArguments, DataArguments, Templ
         if self.use_hf or use_hf_hub():
             self.use_hf = True
             os.environ['USE_HF'] = '1'
-        self._init_adapters()
+        self._init_adapters()                   # lora增量微调参数
         self._init_ckpt_dir()
         self._import_external_plugins()
         self._init_model_kwargs()
@@ -178,7 +178,7 @@ class BaseArguments(GenerationArguments, QuantizeArguments, DataArguments, Templ
             self.max_length = self.model_info.max_model_len
         if self.packing and self.packing_length is None:
             self.packing_length = self.max_length
-        self._init_lazy_tokenize()
+        self._init_lazy_tokenize()              # MLLM为True 节约内存
         self.hub = get_hub(self.use_hf)
         if self.hub.try_login(self.hub_token):
             logger.info('hub login successful!')

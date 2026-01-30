@@ -170,7 +170,7 @@ def get_matched_model_meta(model_id_or_path: str) -> Optional[ModelMeta]:
         if model_group is not None:
             model_meta = deepcopy(model_meta)
             for k, v in asdict(model_group).items():
-                if v is not None and k in model_meta.__dict__:
+                if v is not None and k in model_meta.__dict__:          # 用model group的属性更新model
                     setattr(model_meta, k, v)
             return model_meta
 
@@ -219,8 +219,10 @@ def _get_model_info(model_dir: str, model_type: Optional[str], quantization_conf
     is_moe_model = HfConfigFactory.is_moe_model(config)
     is_multimodal = HfConfigFactory.is_multimodal(config)
 
+    # 尝试从json里获取
     if model_type is None:
         model_type = _read_args_json_model_type(model_dir)
+    # 尝试从hf架构中获取
     if model_type is None:
         architectures = HfConfigFactory.get_config_attr(config, 'architectures')
         model_types = get_matched_model_types(architectures)
@@ -265,8 +267,8 @@ def get_model_info_meta(
         problem_type=None,
         **kwargs) -> Tuple[ModelInfo, ModelMeta]:
     from .register import ModelLoader
-    model_meta = get_matched_model_meta(model_id_or_path)
-    model_dir = safe_snapshot_download(
+    model_meta = get_matched_model_meta(model_id_or_path)                   # 模型名片
+    model_dir = safe_snapshot_download(                                     # 模型路径 名称
         model_id_or_path,
         revision=revision,
         download_model=download_model,
@@ -274,13 +276,16 @@ def get_model_info_meta(
         ignore_patterns=getattr(model_meta, 'ignore_patterns', None),
         hub_token=hub_token)
 
-    model_type = model_type or getattr(model_meta, 'model_type', None)
+    # model type 自建模型需要重点看这部分++++++++++++++++++++++++++++++++++++++++++++++
+    model_type = model_type or getattr(model_meta, 'model_type', None)      # 模型类型 比如Qwen2
     model_info = _get_model_info(model_dir, model_type, quantization_config=quantization_config)
     if model_type is None and model_info.model_type is not None:
         model_type = model_info.model_type
         logger.info(f'Setting model_type: {model_type}')
     if model_type is not None and (model_meta is None or model_meta.model_type != model_type):
         model_meta = MODEL_MAPPING[model_type]
+
+    # model_meta校验 自建模型要看这里+++++++++++++++++++++++++++++++++++++++++++++
     if model_meta is None:  # not found
         if model_info.is_multimodal:
             raise ValueError(f'Model "{model_id_or_path}" is not supported because no suitable `model_type` was found. '
@@ -293,6 +298,8 @@ def get_model_info_meta(
         torch_dtype = model_meta.torch_dtype or get_default_torch_dtype(model_info.torch_dtype)
         logger.info(f'Setting torch_dtype: {torch_dtype}')
     model_info.torch_dtype = torch_dtype
+
+    # task type初始化
     if task_type is None:
         if model_meta.is_reward:
             num_labels = 1

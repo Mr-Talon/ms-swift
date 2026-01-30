@@ -170,6 +170,7 @@ class SftArguments(SwanlabArguments, TunerArguments, BaseArguments, Seq2SeqTrain
             self.resume_from_checkpoint = to_abspath(self.resume_from_checkpoint, True)
             # The non-resume_only_model will have its weights loaded in the trainer.
             if self.resume_only_model:
+                # 忽略优化器状态和随机种子
                 if self.tuner_type == 'full':
                     self.model = self.resume_from_checkpoint
                 else:
@@ -177,6 +178,7 @@ class SftArguments(SwanlabArguments, TunerArguments, BaseArguments, Seq2SeqTrain
         BaseArguments.__post_init__(self)
         self._init_override()
         TunerArguments.__post_init__(self)
+        # padding 加速
         self._check_padding_free()
         if self.optimizer is None:
             if self.lorap_lr_ratio:
@@ -190,7 +192,9 @@ class SftArguments(SwanlabArguments, TunerArguments, BaseArguments, Seq2SeqTrain
 
         self._handle_pai_compat()
 
+        # deepspeed加速
         self._init_deepspeed()
+        # pytorch fsdp2分布式训练
         self._init_fsdp()
         self._init_device()
 
@@ -198,7 +202,7 @@ class SftArguments(SwanlabArguments, TunerArguments, BaseArguments, Seq2SeqTrain
             self.accelerator_config = {'dispatch_batches': False}
         if not (self.eval_dataset or self._val_dataset_exists):
             self.eval_strategy = 'no'
-        self.training_args = TrainerFactory.get_training_args(self)
+        self.training_args = TrainerFactory.get_training_args(self)     # 初始化训练参数配置 过滤参数
         self.training_args.remove_unused_columns = False
         self._add_version()
 
@@ -375,6 +379,7 @@ class SftArguments(SwanlabArguments, TunerArguments, BaseArguments, Seq2SeqTrain
 
     def _init_metric(self):
         if self.eval_metric is None:
+            # 测试为生成式的时候，会使用nlg作为指标
             if self.task_type == 'causal_lm' and self.predict_with_generate:
                 self.eval_metric = 'nlg'
             elif self.task_type == 'embedding':
@@ -382,6 +387,7 @@ class SftArguments(SwanlabArguments, TunerArguments, BaseArguments, Seq2SeqTrain
             elif self.task_type in {'reranker', 'generative_reranker'}:
                 self.eval_metric = 'reranker'
         if self.metric_for_best_model is None:
+            # 否则指标就是loss
             self.metric_for_best_model = 'rouge-l' if self.predict_with_generate else 'loss'
         if self.greater_is_better is None and self.metric_for_best_model is not None:
-            self.greater_is_better = 'loss' not in self.metric_for_best_model
+            self.greater_is_better = 'loss' not in self.metric_for_best_model           # False

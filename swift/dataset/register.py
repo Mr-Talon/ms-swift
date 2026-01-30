@@ -49,8 +49,10 @@ def _preprocess_d_info(d_info: Dict[str, Any], *, base_dir: Optional[str] = None
         columns = d_info.pop('columns')
 
     if 'messages' in d_info:
+        # 对话格式的数据  目前没有
         d_info['preprocess_func'] = MessagesPreprocessor(**d_info.pop('messages'), columns=columns)
     else:
+        # 其他格式自动检测
         d_info['preprocess_func'] = AutoPreprocessor(columns=columns)
 
     if 'dataset_path' in d_info:
@@ -106,6 +108,8 @@ def register_dataset_info(dataset_info: Union[str, List[str], None] = None) -> L
             dataset_info = json.loads(dataset_info)  # json
     if len(dataset_info) == 0:
         return []
+
+    # 注册数据集
     res = []
     for d_info in dataset_info:
         res.append(_register_d_info(d_info, base_dir=base_dir))

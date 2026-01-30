@@ -548,17 +548,19 @@ def get_model_processor(
     if model_kwargs is None:
         model_kwargs = {}
     if download_model is None:
-        download_model = load_model and not return_dummy_model
+        download_model = load_model and not return_dummy_model      # True
+
+    # 获取模型信息
     model_info, model_meta = get_model_info_meta(
         model_id_or_path,
         torch_dtype=torch_dtype,
         use_hf=use_hf,
         hub_token=hub_token,
         revision=revision,
-        download_model=download_model,
-        model_type=model_type,
+        download_model=download_model,              # true
+        model_type=model_type,                      # 已初始化   自建模型需要看一下  +++++++++++++++++
         quantization_config=quantization_config,
-        task_type=task_type,
+        task_type=task_type,                        # 已初始化   自建模型需要看一下  +++++++++++++++++
         num_labels=num_labels,
         problem_type=problem_type)
     if device_map is None:
@@ -571,7 +573,7 @@ def get_model_processor(
     loader = model_meta.loader(
         model_info,
         model_meta,
-        load_model=load_model,
+        load_model=load_model,                      # True
         attn_impl=attn_impl,
         experts_impl=experts_impl,
         rope_scaling=rope_scaling,

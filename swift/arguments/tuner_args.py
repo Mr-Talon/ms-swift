@@ -198,13 +198,14 @@ class TunerArguments:
     def __post_init__(self):
         if isinstance(self.init_weights, str) and self.init_weights.lower() in {'true', 'false'}:
             self.init_weights = bool(strtobool(self.init_weights))
-        self._init_multimodal_full()
+        self._init_multimodal_full()   # 多模态全量微调下 冻结参数设置
         if self.target_regex:
             self.target_modules = self.target_regex
 
     def _init_multimodal_full(self):
         model_arch = self.model_meta.model_arch
         if not self.model_meta.is_multimodal or not model_arch or self.tuner_type != 'full':
+            # 多模态 + 全量微调
             return
         if self.freeze_llm:
             self.freeze_parameters += model_arch.language_model
