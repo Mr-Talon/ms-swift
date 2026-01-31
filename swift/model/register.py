@@ -573,7 +573,7 @@ def get_model_processor(
     loader = model_meta.loader(
         model_info,
         model_meta,
-        load_model=load_model,                      # True
+        load_model=load_model,                      # True   +++++
         attn_impl=attn_impl,
         experts_impl=experts_impl,
         rope_scaling=rope_scaling,
