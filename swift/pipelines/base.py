@@ -41,6 +41,7 @@ class SwiftPipeline(ABC, ProcessorMixin):
                 and 'dsw-' in os.environ['JUPYTER_NAME'] and 'GRADIO_ROOT_PATH' not in os.environ):
             os.environ['GRADIO_ROOT_PATH'] = f"/{os.environ['JUPYTER_NAME']}/proxy/{args.server_port}"
 
+    # 调用run
     def main(self):
         logger.info(f'Start time of running main: {dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")}')
         logger.info(f'swift.__version__: {swift.__version__}')

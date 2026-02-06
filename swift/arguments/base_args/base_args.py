@@ -141,6 +141,7 @@ class BaseArguments(GenerationArguments, QuantizeArguments, DataArguments, Templ
             return True
         return False
 
+    # lora增量
     def _init_adapters(self):
         if isinstance(self.adapters, str):
             self.adapters = [self.adapters]
@@ -302,10 +303,11 @@ class BaseArguments(GenerationArguments, QuantizeArguments, DataArguments, Templ
             template_type = kwargs.get('template_type')
         else:
             template_type = self.template
-        template_kwargs['template_type'] = template_type
+        template_kwargs['template_type'] = template_type        # None
         template = get_template(processor, **template_kwargs)
         return template
 
+    # 调用同名函数 获取模型的tokenizer/processor
     def get_model_processor(self,
                             *,
                             model=None,

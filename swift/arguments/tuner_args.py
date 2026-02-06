@@ -202,6 +202,7 @@ class TunerArguments:
         if self.target_regex:
             self.target_modules = self.target_regex
 
+    # 多模态冻结设置
     def _init_multimodal_full(self):
         model_arch = self.model_meta.model_arch
         if not self.model_meta.is_multimodal or not model_arch or self.tuner_type != 'full':

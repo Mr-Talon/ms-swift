@@ -138,7 +138,7 @@ class TemplateArguments:
 
     def __post_init__(self):
         if self.template is None and getattr(self, 'model_meta', None):
-            self.template = self.model_meta.template
+            self.template = self.model_meta.template        # 初始化为None
         if self.use_chat_template is None:
             self.use_chat_template = True
         if self.system is not None:
@@ -159,12 +159,13 @@ class TemplateArguments:
             else:
                 self.padding_side = 'right'
 
+    # 获取模板配置项
     def get_template_kwargs(self):
         from ..sft_args import SftArguments
         truncation_strategy = self.truncation_strategy
-        if truncation_strategy == 'delete':
-            truncation_strategy = 'raise'
-        remove_unused_columns = self.remove_unused_columns  # from DataArguments
+        if truncation_strategy == 'delete':         # 截断操作
+            truncation_strategy = 'raise'           # 抛出异常
+        remove_unused_columns = self.remove_unused_columns  # from DataArguments   True
         if not isinstance(self, SftArguments) or hasattr(self, 'rlhf_type') and self.rlhf_type == 'grpo':
             remove_unused_columns = True
         return {

@@ -140,6 +140,7 @@ class ModelArguments:
         if self.bf16 is None:
             self.bf16 = bf16
 
+    # 旋转位置编码
     def _init_rope_scaling(self):
         if self.rope_scaling:
             rope_scaling: dict = json_parse_to_dict(self.rope_scaling, strict=False)
@@ -202,6 +203,7 @@ class ModelArguments:
             self._init_rope_scaling()
         return self.model_info.torch_dtype
 
+    # 增加新token
     def _init_new_special_tokens(self):
         if isinstance(self.new_special_tokens, str):
             self.new_special_tokens = [self.new_special_tokens]

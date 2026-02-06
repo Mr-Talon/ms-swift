@@ -148,6 +148,7 @@ def patch_ignore_check_imports():
         td.check_imports = _old_check_imports
 
 
+# 从MLLM中提取LLM的部分
 def get_lm_head_model(model, model_meta=None, lm_heads=None):
     if isinstance(model, PeftModel):
         model = model.model
@@ -372,8 +373,10 @@ def patch_automodel_for_sequence_classification(model_info=None,
                     pass
 
 
+# 替换from pretrain
 @contextmanager
 def patch_automodel(model_info, model_meta, auto_model_cls, return_dummy_model, **kwargs):
+    # 替换原始的from pretrain
     from_pretrained = PreTrainedModel.from_pretrained.__func__
 
     @classmethod

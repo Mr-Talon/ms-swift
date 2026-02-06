@@ -26,6 +26,7 @@ from .utils import AttnImpl, InitModelStrategy, get_default_device_map
 logger = get_logger()
 
 
+# 注册model map
 def register_model(model_meta: ModelMeta, *, exist_ok: bool = False) -> None:
     """
     model_type: The unique ID for the model type. Models with the same model_type share
@@ -93,6 +94,7 @@ def load_by_unsloth(args):
     return model, processor
 
 
+# 量化才会用到
 def _patch_awq_compat(model_info):
     if version.parse(transformers.__version__) < version.parse('4.50') or model_info.quant_method != 'awq':
         return
@@ -128,6 +130,7 @@ def _set_property(model, key):
     setattr(model.__class__, key, property(_value))
 
 
+# 输出配置为空设置默认的
 def fix_do_sample_warning(generation_config: GenerationConfig) -> None:
     # Use the default values of temperature/top_p/top_k in generation_config.
     if generation_config.temperature == 0:
@@ -206,12 +209,15 @@ class ModelLoader(BaseModelLoader):
         _patch_awq_compat(model_info)
         logger.info(f'model_kwargs: {model_kwargs}')
 
+    # 配置
     def _postprocess_config(self, config):
         # fix prediction_step (internvl2, ovis, ...)
         if not hasattr(config, 'keys_to_ignore_at_inference'):
             config.keys_to_ignore_at_inference = []
         if 'past_key_values' not in config.keys_to_ignore_at_inference:
             config.keys_to_ignore_at_inference.append('past_key_values')
+
+        # dtype参数
         torch_dtype = self.model_info.torch_dtype
         HfConfigFactory.set_config_attr(config, 'torch_dtype', torch_dtype, include_vit=True)
         HfConfigFactory.compat_zero3(config)
@@ -236,6 +242,7 @@ class ModelLoader(BaseModelLoader):
         auto_config_cls = self.auto_config_cls or AutoConfig
         return auto_config_cls.from_pretrained(model_dir, trust_remote_code=True)
 
+    # 从processor中提取tokenizer
     def _get_tokenizer(self, processor):
         if not isinstance(processor, PreTrainedTokenizerBase) and hasattr(processor, 'tokenizer'):
             tokenizer = processor.tokenizer
@@ -262,6 +269,7 @@ class ModelLoader(BaseModelLoader):
         model_meta = self.model_meta
         auto_model_cls = self.auto_model_cls
         model = None
+        # 默认task type是causal lm
         if model_info.task_type in {'seq_cls', 'reranker'} and auto_model_cls is None and not self.return_dummy_model:
             with patch_automodel_for_sequence_classification(model_config=config, patch_from_pretrained=False):
                 try:
@@ -271,12 +279,13 @@ class ModelLoader(BaseModelLoader):
                 except ValueError:
                     pass
 
+        # 默认AutoModelForCausalLM
         auto_model_cls = auto_model_cls or AutoModelForCausalLM
         context_kwargs = {
             'model_info': model_info,
             'model_meta': model_meta,
             'auto_model_cls': auto_model_cls,
-            'return_dummy_model': self.return_dummy_model,
+            'return_dummy_model': self.return_dummy_model,          # 默认False
         }
         if model is None:
             if self.return_dummy_model:
@@ -295,6 +304,7 @@ class ModelLoader(BaseModelLoader):
             else:
                 context = partial(patch_automodel, **context_kwargs)
             with context():
+                # 替换原始的 from pretrain  默认不受影响
                 model = auto_model_cls.from_pretrained(model_dir, config=config, trust_remote_code=True, **model_kwargs)
         # fix not save modeling_xxx.py (transformers 4.45)
         # https://github.com/huggingface/transformers/issues/24737
@@ -326,22 +336,23 @@ class ModelLoader(BaseModelLoader):
 
     def _add_new_special_tokens(self, model, tokenizer):
         if not self.new_special_tokens:
+            # Qwen会返回
             return
         num_new_tokens = tokenizer.add_special_tokens({'additional_special_tokens': self.new_special_tokens})
         if num_new_tokens > 0:
             logger.info(f'Added {num_new_tokens} new special tokens.')
 
             if model is not None and not self.return_dummy_model:
-                llm_model = get_lm_head_model(model, self.model_meta)
+                llm_model = get_lm_head_model(model, self.model_meta)           # 提取语言模型的部分
                 origin_vocab_size = HfConfigFactory.get_config_attr(llm_model.config, 'vocab_size')
-                if origin_vocab_size < len(tokenizer):
+                if origin_vocab_size < len(tokenizer):                          # 扩展词表长度
                     vocab_size = math.ceil(len(tokenizer) / 128) * 128
                     llm_model.resize_token_embeddings(vocab_size)
                     # fix transformers==4.52.4 qwen2.5-vl
                     HfConfigFactory.set_config_attr(llm_model.config, 'vocab_size', vocab_size)
 
     def _postprocess_processor(self, processor: Processor):
-        tokenizer = self._get_tokenizer(processor)
+        tokenizer = self._get_tokenizer(processor)          # processor里提取tokenizer
         pad_token = tokenizer.pad_token_id
         if pad_token is None:
             pad_token = tokenizer.eos_token_id
@@ -355,6 +366,7 @@ class ModelLoader(BaseModelLoader):
         tokenizer.model_info = self.model_info
         tokenizer.model_meta = self.model_meta
 
+    # 版本适配
     def _compat_transformers5(self, model):
         if self.model_meta.is_multimodal:
             for key in ['language_model', 'vision_tower', 'multi_modal_projector', 'visual', 'vision_model']:
@@ -418,19 +430,19 @@ class ModelLoader(BaseModelLoader):
             fix_do_sample_warning(model.generation_config)
 
     def _get_model_processor(self, model_dir, config):
-        processor = self.get_processor(model_dir, config)
+        processor = self.get_processor(model_dir, config)           # tokenizer processor
         model = None
         if self.load_model:
-            model = self.get_model(model_dir, config, processor, self.model_kwargs.copy())
+            model = self.get_model(model_dir, config, processor, self.model_kwargs.copy())      # 获取模型
         return model, processor
 
     def load(self) -> Tuple[Optional[PreTrainedModel], Processor]:
         patch_offload_context = patch_attach_align_device_hook_on_blocks() if self.patch_offload else nullcontext()
         model_dir = self.model_info.model_dir
         with patch_get_dynamic_module(), patch_tp_plan(self.load_model), patch_offload_context:
-            config = self.get_config(model_dir)
-            self._postprocess_config(config)
-            model, processor = self._get_model_processor(model_dir, config)
+            config = self.get_config(model_dir)             # 模型配置
+            self._postprocess_config(config)                # 配置设置
+            model, processor = self._get_model_processor(model_dir, config)     # 获取模型和tokenizer/processor
             self._postprocess_processor(processor)
             if model:
                 self._postprocess_model(model_dir, model)
@@ -583,7 +595,7 @@ def get_model_processor(
         new_special_tokens=new_special_tokens,
         model_kwargs=model_kwargs,
         **kwargs)
-    return loader.load()
+    return loader.load()                            # 返回模型和tokenizer
 
 
 def get_processor(

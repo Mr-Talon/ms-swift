@@ -16,6 +16,7 @@ from .preprocessor import RowPreprocessor
 logger = get_logger()
 
 
+# 采样数据样本 自建数据集一般不使用
 def sample_dataset(
         dataset: HfDataset,
         dataset_sample: Optional[int],

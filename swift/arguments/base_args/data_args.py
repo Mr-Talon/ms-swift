@@ -96,6 +96,7 @@ class DataArguments:
 
     custom_dataset_info: List[str] = field(default_factory=list)  # .json
 
+    # 注册自建数据集
     def _init_custom_dataset_info(self):
         """register custom dataset_info.json to datasets"""
         if isinstance(self.custom_dataset_info, str):
@@ -121,6 +122,7 @@ class DataArguments:
         self._val_dataset_exists = (
             self.dataset and self.split_dataset_ratio > 0 or self.val_dataset or self.cached_val_dataset)
 
+    # 数据集配置
     def get_dataset_kwargs(self):
         return {
             'seed': self.data_seed,

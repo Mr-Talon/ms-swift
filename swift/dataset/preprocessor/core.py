@@ -23,6 +23,7 @@ logger = get_logger()
 _pair_keys = ['messages', 'images', 'videos', 'audios', 'tools', 'objects']
 
 
+# 数据处理器父类
 class RowPreprocessor:
     standard_keys = _pair_keys + list(
         chain.from_iterable([f'{prefix}_{k}' for k in _pair_keys]
@@ -57,13 +58,14 @@ class RowPreprocessor:
             random_state = np.random.RandomState(random_state)
         self.random_state = random_state
 
+    # 检查message字段
     @staticmethod
     def _check_messages(row: Dict[str, Any]) -> None:
         if 'messages' not in row:
             return
         messages = row['messages']
         assert len(messages) > 0, f'messages: {messages}'
-        # fix swift/SlimOrca
+        # fix swift/SlimOrca  删除多余的键
         for message in messages:
             keys = set(message.keys()) - {'role', 'content', 'loss'}
             for key in keys:
@@ -75,13 +77,16 @@ class RowPreprocessor:
             assert role in {'system', 'user', 'tool_call', 'tool_response', 'tool', 'assistant'}, f'message: {message}'
             assert content is not None, f'message: {message}'
 
+    # 检查多模态数据  图像从路径列表变为 字典
     @staticmethod
     def _cast_mm_data(row: Dict[str, Any]) -> None:
         for key in ['images', 'rejected_images']:
             images = row.get(key, None)
+            # 这边会遇到LLM的数据 也会有MLLM中没有图片的数据
             if images is None:
                 continue
 
+            # 检测图片输入
             if isinstance(images, str) or (isinstance(images, list) and images and isinstance(images[0], str)):
                 if isinstance(images, str):
                     images = [images]
@@ -91,6 +96,7 @@ class RowPreprocessor:
             elif isinstance(images, dict):
                 row[key] = [images]
 
+        # 视频 音频
         for key in ['videos', 'audios']:
             mm_data = row.get(key)
             if mm_data is None:
@@ -98,6 +104,7 @@ class RowPreprocessor:
             elif isinstance(mm_data, str):
                 row[key] = [mm_data]
 
+    # DPO数据处理
     @staticmethod
     def _check_rejected_response(row: Dict[str, Any]) -> None:
         if 'rejected_response' in row:
@@ -113,6 +120,7 @@ class RowPreprocessor:
     def prepare_dataset(self, dataset: DATASET_TYPE) -> DATASET_TYPE:
         return dataset
 
+    # 输入进来的是message一个列表 images一个列表  处理成单个对话  字典列表的形式
     @staticmethod
     def batched_to_rows(batched_row: Dict[str, Any]):
         keys = list(batched_row.keys())
@@ -132,6 +140,7 @@ class RowPreprocessor:
                 batched[k].append(None)
         return batched
 
+    # 去除流式数据前缀
     @staticmethod
     def _remove_prefix_keys(row, prefix: str):
         for k in list(row.keys()):
@@ -141,6 +150,7 @@ class RowPreprocessor:
                 if new_k not in row:
                     row[new_k] = new_v
 
+    # 目标检测任务
     @staticmethod
     def _check_objects(row):
         objects = row.get('objects')
@@ -164,17 +174,25 @@ class RowPreprocessor:
             if box[1] > box[3]:
                 box[1], box[3] = box[3], box[1]
 
+    # 数据格式检查
     def batched_preprocess(self, batched_row: Dict[str, Any], *, strict: bool,
                            ignore_max_length_error: bool) -> Dict[str, Any]:
         from ...template import MaxLengthError
         batched_row = dict(batched_row)
         assert len(batched_row) > 0
+        # 流式数据前缀
         self._remove_prefix_keys(batched_row, '__@')  # compat streaming
-        rows = self.batched_to_rows(batched_row)
+        rows = self.batched_to_rows(batched_row)        # 字典列表 和json一样
 
         new_rows = []
         for row in rows:
+            # 每个row是这种形式
+            # {
+            #         "messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}],
+            #         "images": ["/xxx/x.jpg", "/xxx/x.png"]
+            #     }
             try:
+                # 统一message格式 键名称 系统提示
                 row = self.preprocess(row)
                 # support [row1, row2, ...]
                 if row is None:
@@ -182,9 +200,12 @@ class RowPreprocessor:
                 if isinstance(row, dict):
                     row = [row]
                 for r in row:
+                    # 目标检测任务
                     self._check_objects(r)
+                    # DPO数据
                     self._check_rejected_response(r)
                     self._check_messages(r)
+                    # 多模态数据处理   图片从路径列表变成字典列表
                     self._cast_mm_data(r)
             except Exception as e:
                 if strict:
@@ -206,6 +227,7 @@ class RowPreprocessor:
 
         return res
 
+    # 确保数据集有feature
     @staticmethod
     def get_features_dataset(dataset: DATASET_TYPE) -> DATASET_TYPE:
         if dataset.features is None:
@@ -213,6 +235,7 @@ class RowPreprocessor:
             dataset = dataset._resolve_features()
         return dataset
 
+    # 替换数据集的列名
     @staticmethod
     def safe_rename_columns(dataset, columns):
         dataset = RowPreprocessor.get_features_dataset(dataset)
@@ -233,6 +256,7 @@ class RowPreprocessor:
 
         return dataset
 
+    # 删除没有用的列名
     @staticmethod
     def remove_useless_columns(dataset: DATASET_TYPE) -> DATASET_TYPE:
         dataset = RowPreprocessor.get_features_dataset(dataset)
@@ -242,6 +266,7 @@ class RowPreprocessor:
             dataset = dataset.select_columns(k_list)
         return dataset
 
+    # 上下文管理器 预定义一些标准数据集里没有的feature
     @staticmethod
     @contextmanager
     def _patch_arrow_writer():
@@ -281,6 +306,7 @@ class RowPreprocessor:
             ArrowWriter.__init__ = ArrowWriter.__origin_init__
             del ArrowWriter.__origin_init__
 
+    # 关闭图像自动解码
     def _cast_pil_image(self, dataset):
         features = dataset.features
         for col in ['images', 'rejected_images']:
@@ -298,6 +324,7 @@ class RowPreprocessor:
         batch_size: Optional[int] = None,
     ) -> DATASET_TYPE:
         from ..utils import sample_dataset
+        # 创建配置项
         if batch_size is None:
             batch_size = 1000 if isinstance(dataset, HfDataset) else 16
         if self.dataset_sample is not None:
@@ -312,6 +339,8 @@ class RowPreprocessor:
                 'load_from_cache_file': load_from_cache_file,
             })
         # compat GRPO: The solution field will be retained.
+
+        # 预处理数据集
         dataset = RowPreprocessor.get_features_dataset(dataset)
         if 'solution' in dataset.features:
             with safe_ddp_context(None, True):
@@ -324,6 +353,7 @@ class RowPreprocessor:
         dataset = self.safe_rename_columns(dataset, self.columns)
         dataset = self.prepare_dataset(dataset)
         dataset = self._cast_pil_image(dataset)
+        # 流数据
         if isinstance(dataset, HfIterableDataset):
             # fix: https://github.com/huggingface/datasets/issues/6408
             columns = {k: f'__@{k}' for k in RowPreprocessor.standard_keys if k in dataset.features}
@@ -336,6 +366,7 @@ class RowPreprocessor:
                 if isinstance(dataset, HfDataset) and not dataset.cache_files:
                     map_kwargs['cache_file_name'] = os.path.join(get_cache_dir(), 'datasets', 'map_cache',
                                                                  f'{dataset._fingerprint}.arrow')
+                # 批处理
                 dataset_mapped = dataset.map(
                     self.batched_preprocess,
                     fn_kwargs={
@@ -417,6 +448,7 @@ def default_repair_messages(s: Union[str, Any]) -> Any:
     return s
 
 
+# message格式数据处理器
 class MessagesPreprocessor(RowPreprocessor):
 
     def __init__(
@@ -446,10 +478,12 @@ class MessagesPreprocessor(RowPreprocessor):
         self.repair_messages = repair_messages
         self.inner_key = inner_key
 
+        # 处理对话数据的键
         message_keys = ['messages', 'conversation', 'conversations']
         for key in message_keys:
             self.columns[key] = 'messages'
         # sharegptq
+        # 处理系统提示
         system_keys = ['system', 'system_prompt']
         if system_role not in system_keys:
             system_keys.append(system_role)
@@ -475,7 +509,9 @@ class MessagesPreprocessor(RowPreprocessor):
             new_messages.append(assistant_message)
         return new_messages
 
+    # message键名标准化
     def to_std_messages(self, messages: List[Dict[str, str]], system: Optional[str]) -> None:
+        # 系统提示
         if messages[0]['role'] == self.system_role:
             messages[0]['role'] = 'system'
         elif system is not None:
@@ -491,6 +527,7 @@ class MessagesPreprocessor(RowPreprocessor):
             elif role.replace('-', '_') in self.tool_response_roles:
                 message['role'] = 'tool_response'
 
+    # 统一message字典键名称
     @staticmethod
     def _to_std_key(messages: List[Dict[str, str]], std_key: str, optional_keys: List[str]) -> None:
         for message in messages:
@@ -498,7 +535,9 @@ class MessagesPreprocessor(RowPreprocessor):
                 if key in message:
                     message[std_key] = message.pop(key)
 
+    # 统一message键 转换系统提示词
     def preprocess(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        # row是一个对话的字典 message字典列表 images列表
         if 'rejected_messages' in row:
             row['rejected_messages'] = MessagesPreprocessor.preprocess(
                 self, {'messages': row['rejected_messages']})['messages']
@@ -508,12 +547,15 @@ class MessagesPreprocessor(RowPreprocessor):
         messages: Optional[List[Dict[str, str]]] = self.repair_messages(messages)
         if not messages or isinstance(messages, str):
             return
+
+        # 获取了message之后
         self._to_std_key(messages, 'role', self.role_keys)
         self._to_std_key(messages, 'content', self.content_keys)
-        system = row.pop('system', None)
+        system = row.pop('system', None)        # 系统提示词
         if self._is_sharegpt_format(messages[0]):
             messages = self.sharegpt_to_messages(messages, system)
         else:
+            # 使用message标准格式数据
             self.to_std_messages(messages, system)  # inplace
         row['messages'] = messages
         return row
@@ -537,9 +579,12 @@ class AutoPreprocessor:
         features = dataset.features
         for key in ['conversation', 'conversations', 'messages']:
             if key in features:
+                # 对话格式的数据
                 return MessagesPreprocessor(**self.kwargs)
         if 'instruction' in features and 'input' in features:
+            # 指令 输入 输出格式
             return AlpacaPreprocessor(**self.kwargs)
+        # 问答格式
         return ResponsePreprocessor(**self.kwargs)
 
     def __call__(
@@ -551,5 +596,6 @@ class AutoPreprocessor:
         strict: bool = False,
     ) -> DATASET_TYPE:
         dataset = RowPreprocessor.safe_rename_columns(dataset, self.columns)
+        # 根据数据集自动匹配processor
         preprocessor = self._get_preprocessor(dataset)
         return preprocessor(dataset, num_proc=num_proc, load_from_cache_file=load_from_cache_file, strict=strict)

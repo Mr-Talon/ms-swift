@@ -24,6 +24,7 @@ def get_dataset_list():
     return datasets
 
 
+# datamap注册
 def register_dataset(dataset_meta: DatasetMeta, *, exist_ok: bool = False) -> None:
     """Register dataset
 
@@ -41,6 +42,7 @@ def register_dataset(dataset_meta: DatasetMeta, *, exist_ok: bool = False) -> No
     DATASET_MAPPING[dataset_name] = dataset_meta
 
 
+# 处理数据集
 def _preprocess_d_info(d_info: Dict[str, Any], *, base_dir: Optional[str] = None) -> Dict[str, Any]:
     d_info = deepcopy(d_info)
 
@@ -72,6 +74,7 @@ def _preprocess_d_info(d_info: Dict[str, Any], *, base_dir: Optional[str] = None
     return d_info
 
 
+# 注册数据集
 def _register_d_info(d_info: Dict[str, Any], *, base_dir: Optional[str] = None) -> DatasetMeta:
     """Register a single dataset to dataset mapping
 
@@ -91,7 +94,7 @@ def register_dataset_info(dataset_info: Union[str, List[str], None] = None) -> L
     Args:
         dataset_info: The dataset info path
     """
-    # dataset_info_path: path, json or None
+    # dataset_info_path: path, json or None  init初始化的时候
     if dataset_info is None:
         dataset_info = os.path.join(os.path.dirname(__file__), 'data', 'dataset_info.json')
     assert isinstance(dataset_info, (str, list))

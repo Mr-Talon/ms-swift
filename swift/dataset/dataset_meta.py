@@ -51,6 +51,7 @@ class SubsetDataset:
         return subset_dataset
 
 
+# 数据集预处理
 class BaseDatasetLoader(ABC):
 
     @abstractmethod
@@ -63,6 +64,7 @@ class BaseDatasetLoader(ABC):
     ) -> HfDataset:
         pass
 
+    # 下载数据 ms
     @staticmethod
     def download_ms_dataset(ms_dataset_id: str, files: List[str], force_download: bool = False) -> str:
         """Download dataset from repo manually
@@ -101,6 +103,7 @@ class BaseDatasetLoader(ABC):
             return datasets[0]
         return concatenate_datasets(datasets)
 
+    # 流式数据用
     @staticmethod
     def interleave_datasets(datasets, *args, **kwargs):
         if len(datasets) == 0:
@@ -117,6 +120,7 @@ class BaseDatasetLoader(ABC):
         else:
             return dataset.shuffle(seed=seed, buffer_size=buffer_size)
 
+    # 数据集划分 采样
     @staticmethod
     def post_process(
         train_dataset: DATASET_TYPE,
@@ -130,6 +134,7 @@ class BaseDatasetLoader(ABC):
         """Split into train/val datasets and perform dataset sampling."""
         assert dataset_sample is None or dataset_sample > 0
         assert 0 <= split_dataset_ratio <= 1
+        # 流式数据
         if streaming:
             if dataset_sample is None:
                 if split_dataset_ratio == 0:
@@ -147,9 +152,11 @@ class BaseDatasetLoader(ABC):
                 if val_sample:
                     train_dataset = train_dataset.skip(val_sample)
         else:
+            # 划分数据集 一般没验证集
             if dataset_sample is None:
                 dataset_sample = len(train_dataset)
             if split_dataset_ratio == 0:
+                # 根据命令行的采样个数采样 自建数据集一般不会采样 返回的是完整的数据集
                 train_dataset = sample_dataset(train_dataset, dataset_sample, shuffle, random_state)
                 val_dataset = None
             elif split_dataset_ratio == 1:

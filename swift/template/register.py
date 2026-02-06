@@ -20,6 +20,7 @@ def register_template(template_meta: TemplateMeta, *, exist_ok: bool = False) ->
     TEMPLATE_MAPPING[template_type] = template_meta
 
 
+# 获取模板类型
 def _read_args_json_template_type(model_dir):
     if not os.path.exists(os.path.join(model_dir, 'args.json')):
         return
@@ -28,9 +29,11 @@ def _read_args_json_template_type(model_dir):
     return args.template_type
 
 
+# 返回模板类型
 def get_template_meta(model_info: 'ModelInfo',
                       model_meta: 'ModelMeta',
                       template_type: Optional[str] = None) -> TemplateMeta:
+    # 自动获取模板类型 Qwen没有json
     if template_type is None and model_info is not None:
         template_type = _read_args_json_template_type(model_info.model_dir)
     template_type = template_type or model_meta.template
@@ -178,6 +181,7 @@ def get_template(
     """
     model_info = processor.model_info
     model_meta = processor.model_meta
+    # 模板类型信息
     template_meta = get_template_meta(model_info, model_meta, template_type=template_type)
     template_cls = template_meta.template_cls
     return template_cls(

@@ -130,6 +130,7 @@ class LogitsStreamer(LogitsProcessor):
         return scores
 
 
+# 根据model_generation_config设置默认值
 def _set_generation_config_default_value(model_generation_config: GenerationConfig,
                                          generation_config: GenerationConfig) -> GenerationConfig:
     for k, v in model_generation_config.to_dict().items():
@@ -140,11 +141,12 @@ def _set_generation_config_default_value(model_generation_config: GenerationConf
             setattr(generation_config, k, v)
     return generation_config
 
-
+# 模型推理生成配置
 def prepare_generation_config(model_generation_config: Optional[GenerationConfig], request_config: RequestConfig,
                               tokenizer) -> Optional[GenerationConfig]:
     if model_generation_config is None or request_config is None:
         return model_generation_config
+    # 模型生成的配置
     kwargs = {'max_new_tokens': request_config.max_tokens}
     # not use: 'n', 'best_of', 'frequency_penalty', 'presence_penalty'
     for key in ['length_penalty']:
@@ -166,6 +168,7 @@ def prepare_generation_config(model_generation_config: Optional[GenerationConfig
     else:
         kwargs['do_sample'] = True
     generation_config = GenerationConfig(**kwargs)
+    # 设置默认值
     generation_config = _set_generation_config_default_value(model_generation_config, generation_config)
     fix_do_sample_warning(generation_config)
 

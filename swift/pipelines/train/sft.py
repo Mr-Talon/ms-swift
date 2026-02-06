@@ -39,6 +39,7 @@ class SwiftSft(SwiftPipeline, TunerMixin):
             except ImportError:
                 raise ValueError('Please install dlrover to use flash ckpt `pip install dlrover[k8s,torch]')
 
+    # 初始化生成的配置
     def _prepare_generation_config(self):
         args = self.args
         self.model.origin_generation_config = self.model.generation_config
@@ -46,10 +47,11 @@ class SwiftSft(SwiftPipeline, TunerMixin):
                                                                  args.get_request_config(), self.tokenizer)
         logger.info(f'model.generation_config: {self.model.generation_config}')
 
+    # 初始化模型
     @RayHelper.function(group='default')
     def _prepare_model_tokenizer(self, **kwargs):
         args = self.args
-        self.model, self.processor = args.get_model_processor(**kwargs)
+        self.model, self.processor = args.get_model_processor(**kwargs)         # 获取模型和tokenizer
         if args.sequence_parallel_size > 1:
             sequence_parallel.prepare(
                 args.sequence_parallel_size, model=self.model, tokenizer=self.processor, padding_free=args.padding_free)
@@ -62,16 +64,17 @@ class SwiftSft(SwiftPipeline, TunerMixin):
 
         self._prepare_generation_config()
 
+    # 初始化模板
     @RayHelper.function(group='default')
     def _prepare_template(self) -> None:
         args = self.args
-        template = args.get_template(self.processor)
+        template = args.get_template(self.processor)        # 模板配置项  Template类
         template.set_mode('train')
-        if template.use_model:
+        if template.use_model:                              # Qwen3 VL 是True
             template.model = self.model
         support_padding_free = template.support_padding_free
         if support_padding_free is None:
-            support_padding_free = not args.model_meta.is_multimodal
+            support_padding_free = not args.model_meta.is_multimodal        # 多模态
         if (args.padding_free or args.packing) and not support_padding_free:
             raise ValueError(f'Template `{args.template}` does not support padding free or packing.')
         self.template = template
@@ -282,13 +285,16 @@ class SwiftSft(SwiftPipeline, TunerMixin):
             if val_dataset is not None and not predict_with_generate:
                 self.train_msg['val_dataset'] = self._stat_dataset(val_dataset)
 
+    # 多模态场景不会处理
     def _encode_dataset(self, train_dataset, val_dataset, pre_process=True):
         template = self.template
         args = self.args
         self._save_val_dataset(val_dataset)
 
-        predict_with_generate = getattr(args, 'predict_with_generate', False)
+        predict_with_generate = getattr(args, 'predict_with_generate', False)       # false
         datasets = [train_dataset, val_dataset]
+
+        # GRPO不做这个函数
         if not pre_process:
             return datasets
 
@@ -307,6 +313,8 @@ class SwiftSft(SwiftPipeline, TunerMixin):
             if i == 1 and predict_with_generate:
                 # val_dataset
                 continue
+
+            # MLLM为True LLM会进行提前加载
             if not args.lazy_tokenize and not args.streaming:
                 # Compatible with cached_dataset, only additionally write length here.
                 preprocessor_cls = EncodePreprocessor if args.truncation_strategy == 'split' else AddLengthPreprocessor

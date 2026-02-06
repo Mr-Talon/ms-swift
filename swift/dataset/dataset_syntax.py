@@ -28,6 +28,7 @@ class DatasetSyntax:
         dataset_sample = '' if self.dataset_sample is None else f'#{self.dataset_sample}'
         return f'{self.dataset}{subsets}{dataset_sample}'
 
+    # 分割命令行数据集字符串
     @staticmethod
     def _safe_split(s: str,
                     sep: str,
@@ -52,8 +53,10 @@ class DatasetSyntax:
             assert len(part) == 2
         return part
 
+    # 解析命令行数据集  返回一个类   本地数据
     @classmethod
     def parse(cls, dataset: str) -> 'DatasetSyntax':
+        ":: 数据来源    # 样本数    ：子集    / 子集"
         """Parse the dataset from the command line"""
         # hf/ms::dataset_id or dataset_path:subset1/subset2/subset3#dataset_sample
         if os.path.exists(dataset):
@@ -78,16 +81,24 @@ class DatasetSyntax:
             dataset_sample = int(dataset_sample)
         return cls(dataset.strip(), subsets or [], dataset_sample, use_hf)
 
+    # 未注册的数据集  直接命令行传入本地数据  返回空
     def get_dataset_meta(self, use_hf: bool):
-        dataset_meta_mapping = self._get_dataset_meta_mapping()
+        # 已注册的dataset map信息
+        dataset_meta_mapping = self._get_dataset_meta_mapping()     # 字典
         dataset_type = self.dataset_type
+        # 处理已注册但未精准匹配的数据集
         if dataset_type == 'path':
+            # 本地数据 未注册 none
             dataset_meta = dataset_meta_mapping.get((dataset_type, self.dataset))
         else:
+            # 远程仓库
             dataset_type = 'repo' if os.path.isdir(self.dataset) else {True: 'hf', False: 'ms'}[use_hf]
             dataset_meta = dataset_meta_mapping.get((dataset_type, self.dataset))
+
+        # 处理未注册的 上面返回是空（第三个
         return dataset_meta or self._get_matched_dataset_meta(dataset_meta_mapping) or DatasetMeta()
 
+    # 从dataset map中提取数据
     @staticmethod
     def _get_dataset_meta_mapping() -> Dict[Tuple[str, str], DatasetMeta]:
         global _dataset_meta_mapping
@@ -118,6 +129,7 @@ class DatasetSyntax:
         return dataset_name
 
     def _get_matched_dataset_meta(self, dataset_meta_mapping):
+        # dataset map的信息（二元组键
         suffix_dataset_meta_mapping = {}
         for dataset_name, dataset_meta in dataset_meta_mapping.items():
             dataset_name = self.get_dataset_name(dataset_name[1])

@@ -187,7 +187,7 @@ def _get_arch_mapping():
             res[arch].append(model_type)
     return res
 
-
+# model type 类型 如Qwen
 def get_matched_model_types(architectures: Optional[List[str]]) -> List[str]:
     """Get possible model_type."""
     architectures = architectures or ['null']

@@ -58,6 +58,7 @@ class GenerationArguments:
         if self.stream is None:
             self.stream = False
 
+    # 生成相关的参数
     def get_request_config(self):
         if getattr(self, 'task_type') != 'causal_lm':
             return

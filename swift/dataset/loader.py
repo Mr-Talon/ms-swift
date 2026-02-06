@@ -41,6 +41,7 @@ class DatasetLoader(BaseDatasetLoader):
         self.columns = columns
         self.remove_unused_columns = remove_unused_columns
 
+    # 处理本地路径数据集
     def _load_dataset_path(
         self,
         dataset_path: str,
@@ -48,20 +49,29 @@ class DatasetLoader(BaseDatasetLoader):
     ) -> HfDataset:
         ext = os.path.splitext(dataset_path)[1].lstrip('.')
         file_type = {'jsonl': 'json', 'txt': 'text'}.get(ext) or ext
+        # 构造参数类型
         kwargs = {'split': 'train', 'streaming': self.streaming, 'num_proc': self.num_proc}
         if file_type == 'csv':
             kwargs['na_filter'] = False
+
         with safe_ddp_context(None, True):
             kwargs['cache_dir'] = os.path.join(get_cache_dir(), 'datasets')
-            dataset = hf_load_dataset(file_type, data_files=dataset_path, **kwargs)
+            dataset = hf_load_dataset(file_type, data_files=dataset_path, **kwargs)         # 读取数据  pt dataset
+
         if self.columns:
+            # 数据集列名映射
             dataset = RowPreprocessor.safe_rename_columns(dataset, self.columns)
+
+        # MessagesPreprocessor全部使用这个格式
         dataset = dataset_meta.preprocess_func(
             dataset, num_proc=self.num_proc, load_from_cache_file=self.load_from_cache_file, strict=self.strict)
+
         if self.remove_unused_columns:
+            # 删除不需要的列名
             dataset = RowPreprocessor.remove_useless_columns(dataset)
         return dataset
 
+    # 下载数据集
     def _load_repo_dataset(
         self,
         dataset_id: str,
@@ -157,11 +167,13 @@ class DatasetLoader(BaseDatasetLoader):
         use_hf: Optional[bool] = None,
     ) -> HfDataset:
         if dataset_syntax.dataset_type == 'path':
+            # 本地
             dataset = self._load_dataset_path(
                 dataset_syntax.dataset,
                 dataset_meta=dataset_meta,
             )
         else:
+            # 远程数据
             subsets: List[SubsetDataset] = self._select_subsets(dataset_syntax.subsets, dataset_meta)
             revision = dataset_meta.hf_revision if use_hf else dataset_meta.ms_revision
             datasets = []
@@ -177,6 +189,7 @@ class DatasetLoader(BaseDatasetLoader):
         return dataset
 
 
+# 自我认知任务 测试用
 def init_self_cognition_preprocessor(
     dataset_meta: Optional[DatasetMeta],
     model_name: Optional[Union[Tuple[str, str], List[str]]] = None,
@@ -204,6 +217,7 @@ def init_self_cognition_preprocessor(
                      f"author: {kwargs['author']}.")
 
 
+# 加载 预处理 划分数据集
 def load_dataset(
     datasets: Union[List[str], str],
     *,
@@ -313,19 +327,26 @@ def load_dataset(
     if use_hf_default is None:
         use_hf_default = True if use_hf_hub() else False
     for dataset in datasets:
+        # 返回数据集信息的类   只有dataset属性 本地数据
         dataset_syntax = DatasetSyntax.parse(dataset)
-        use_hf = dataset_syntax.use_hf or use_hf_default
+        use_hf = dataset_syntax.use_hf or use_hf_default        # None 本地数据
         # compat dataset_name
         if dataset_syntax.dataset in DATASET_MAPPING:
+            # 提前注册好的数据集 dataset info json内注册 或者custom dataset注册
             dataset_meta = DATASET_MAPPING[dataset_syntax.dataset]
             if dataset_syntax.use_hf is None and dataset_meta.dataset_path is not None:
+                # 本地数据集
                 dataset_syntax.dataset = dataset_meta.dataset_path
                 dataset_syntax.dataset_type = 'path'
             else:
+                # 可下载的数据集
                 dataset_syntax.dataset = dataset_meta.hf_dataset_id if use_hf else dataset_meta.ms_dataset_id
         else:
+            # 未注册的数据集（命令行传入  返回空
             dataset_meta = dataset_syntax.get_dataset_meta(use_hf)
+        # MessagesPreprocessor处理器的dataset
         train_dataset = loader.load(dataset_syntax, dataset_meta, use_hf=use_hf)
+        # 本地数据一般不采样
         train_dataset, val_dataset = loader.post_process(
             train_dataset,
             dataset_sample=dataset_syntax.dataset_sample,
@@ -339,6 +360,7 @@ def load_dataset(
         if val_dataset is not None:
             val_datasets.append(val_dataset)
 
+    # 合并数据集
     if interleave_prob is None:
         train_datasets = loader.concat_datasets(train_datasets)
         val_datasets = loader.concat_datasets(val_datasets)
