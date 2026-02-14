@@ -626,7 +626,7 @@ register_model(
         architectures=['Qwen3NextForCausalLM'],
     ))
 
-
+# 修复视频相关
 def _get_new_read_video_func(read_video_func, read_backend):
     if read_backend == 'torchvision':
 
@@ -646,7 +646,7 @@ def _get_new_read_video_func(read_video_func, read_backend):
 
     return _new_read_video
 
-
+# 修复视频配置
 def patch_qwen_vl_utils(vision_process):
     if hasattr(vision_process, '_patch'):
         return
@@ -655,7 +655,7 @@ def patch_qwen_vl_utils(vision_process):
         os.environ['VIDEO_TOTAL_PIXELS'] = str(int(128000 * 28 * 28 * 0.9))
     res = {}
     for key in [
-            'image_factor',  # image_patch_size * SPATIAL_MERGE_SIZE
+            'image_factor',  # image_patch_size * SPATIAL_MERGE_SIZE     32
             'min_pixels',  # IMAGE_MIN_TOKEN_NUM * image_factor ** 2
             'max_pixels',
             'video_min_pixels',
@@ -696,9 +696,9 @@ def patch_qwen_vl_utils(vision_process):
     vision_process._patch = True
     return res
 
-
+# 像素环境变量转换为token环境变量
 def compat_qwen_vl_utils(image_patch_size: int):
-    spatial_merge_size = int(os.getenv('SPATIAL_MERGE_SIZE', '2'))
+    spatial_merge_size = int(os.getenv('SPATIAL_MERGE_SIZE', '2'))      # patch合并 实际一个token是32像素长的patch
     image_factor = image_patch_size * spatial_merge_size
     env_vars_to_process = {
         'MAX_PIXELS': 'IMAGE_MAX_TOKEN_NUM',
@@ -714,6 +714,7 @@ def compat_qwen_vl_utils(image_patch_size: int):
 
 class Qwen2VLLoader(ModelLoader):
 
+    # 被qwen3vl 重写
     def get_model(self, model_dir: str, config, processor, model_kwargs) -> PreTrainedModel:
         from transformers import Qwen2VLForConditionalGeneration
         self.auto_model_cls = self.auto_model_cls or Qwen2VLForConditionalGeneration
@@ -722,6 +723,7 @@ class Qwen2VLLoader(ModelLoader):
         patch_get_input_embeddings(base_model.visual, 'patch_embed')
         return model
 
+    # 被qwen3vl 重写
     def _check_qwen_vl_utils(self):
         try:
             qwen_vl_utils_version = importlib.metadata.version('qwen_vl_utils')
@@ -736,7 +738,7 @@ class Qwen2VLLoader(ModelLoader):
     def get_processor(self, model_dir: str, config: PretrainedConfig) -> Processor:
         self._check_qwen_vl_utils()
         from qwen_vl_utils import vision_process
-        processor = super().get_processor(model_dir, config)
+        processor = super().get_processor(model_dir, config)                # tokenizer processor
         global_vars = patch_qwen_vl_utils(vision_process)
         processor.global_vars = global_vars  # In order to have different hashes for the template.
         return processor
@@ -840,6 +842,7 @@ def patch_Qwen3VLMoeTextExperts_dtype():
     Qwen3VLMoeTextExperts.forward = forward
 
 
+# 处理视觉输入
 def _forward_qwen3_vl_or_qwen3_omni(
     self,
     processor,
@@ -854,26 +857,34 @@ def _forward_qwen3_vl_or_qwen3_omni(
         inputs_embeds = self.get_input_embeddings()(input_ids)
 
     dtype = self.visual.dtype
+    # 纯文本输入
     if pixel_values is None and pixel_values_videos is None:  # plain-text
-        images = [Image.new('RGB', (32, 32), (0, 0, 0))]
+        images = [Image.new('RGB', (32, 32), (0, 0, 0))]      # 占位图像
         media_inputs = processor.image_processor(images=images, return_tensors='pt')
         media_inputs = to_device(media_inputs, input_ids.device)
         pixel_values = media_inputs['pixel_values'].type(dtype)
-        image_embeds, deepstack_visual_embeds = self.visual(pixel_values, grid_thw=media_inputs['image_grid_thw'])
-        inputs_embeds = inputs_embeds + image_embeds.mean().to(device=inputs_embeds.device) * 0.
+        image_embeds, deepstack_visual_embeds = self.visual(pixel_values, grid_thw=media_inputs['image_grid_thw'])  # 输入视觉编码器 输出【b*L*e】和ViT每一层的输出
+        inputs_embeds = inputs_embeds + image_embeds.mean().to(device=inputs_embeds.device) * 0.                    # 纯文本输入视觉编码器不会进入计算图，强行加一个计算不改变结果
         visual_pos_masks = None
+    # 多模态输入
     else:
+        # 合并多模态输入，统一进入视觉编码器后切分
+        # 只有视频
         if pixel_values is None:
             pixel_values_mixed = pixel_values_videos
             grid_thw = video_grid_thw
+        # 只有图像
         elif pixel_values_videos is None:
             pixel_values_mixed = pixel_values
             grid_thw = image_grid_thw
+        # 视频 图像都有
         else:
             pixel_values_mixed = torch.concat([pixel_values, pixel_values_videos], dim=0)
             grid_thw = torch.concat([image_grid_thw, video_grid_thw], dim=0)
         pixel_values_mixed = pixel_values_mixed.type(dtype)
-        mixed_embeds, deepstack_visual_embeds = self.visual(pixel_values_mixed, grid_thw=grid_thw)
+        mixed_embeds, deepstack_visual_embeds = self.visual(pixel_values_mixed, grid_thw=grid_thw)      # 只过一次视觉编码器
+
+        # 拆分embeding
         if pixel_values is None:
             image_embeds = None
             video_embeds = mixed_embeds
@@ -886,13 +897,14 @@ def _forward_qwen3_vl_or_qwen3_omni(
             image_embeds = mixed_embeds[:image_tokens]
             video_embeds = mixed_embeds[image_tokens:]
 
-        image_mask = (input_ids == self.config.image_token_id).unsqueeze(-1).expand_as(inputs_embeds)
+        # 创建视觉token mask
+        image_mask = (input_ids == self.config.image_token_id).unsqueeze(-1).expand_as(inputs_embeds)   # 长度和input id一致的bool向量 id里面已经按照图像token设置好了个数
         video_mask = (input_ids == self.config.video_token_id).unsqueeze(-1).expand_as(inputs_embeds)
         image_mask = image_mask.to(inputs_embeds.device)
         video_mask = video_mask.to(inputs_embeds.device)
         if image_embeds is not None:
             image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
-            inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
+            inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)                      # 图像token填充 可以处理多张图片
 
         if video_embeds is not None:
             video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
@@ -913,6 +925,7 @@ def _forward_qwen3_vl_or_qwen3_omni(
     return inputs_embeds, visual_pos_masks, deepstack_visual_embeds
 
 
+# 在文本化的视觉token上再嵌入原始视觉embed
 def _patch_deepstack_process(model):
 
     def _deepstack_process(self, hidden_states: torch.Tensor, visual_pos_masks: torch.Tensor,
@@ -925,6 +938,7 @@ def _patch_deepstack_process(model):
             return hidden_states + visual_embeds.mean() * 0
         visual_pos_masks = visual_pos_masks.to(hidden_states.device)
         visual_embeds = visual_embeds.to(hidden_states.device, hidden_states.dtype)
+        # 在文本化的视觉token上再嵌入原始视觉embed
         local_this = hidden_states[visual_pos_masks, :].clone() + visual_embeds
         hidden_states[visual_pos_masks, :] = local_this
         return hidden_states
@@ -932,6 +946,7 @@ def _patch_deepstack_process(model):
     model._deepstack_process = MethodType(_deepstack_process, model)
 
 
+# 修补Qwen3 VL的forward
 def _compat_qwen3_vl_mixed_data(model, processor, is_moe: bool = False):
     if hasattr(model, 'origin_forward'):
         return
@@ -946,18 +961,19 @@ def _compat_qwen3_vl_mixed_data(model, processor, is_moe: bool = False):
     @check_model_inputs
     def forward(
         self,
-        input_ids: torch.LongTensor = None,
+        input_ids: torch.LongTensor = None,                         # 文本+视觉占位符  【当前轮次】
         attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_values: Optional[Cache] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
+        position_ids: Optional[torch.LongTensor] = None,            # 旋转位置编码
+        past_key_values: Optional[Cache] = None,                    # KV cache  之前轮次对话
+        inputs_embeds: Optional[torch.FloatTensor] = None,          # 也可以传入embed好的token
         pixel_values: Optional[torch.Tensor] = None,
         pixel_values_videos: Optional[torch.FloatTensor] = None,
-        image_grid_thw: Optional[torch.LongTensor] = None,
+        image_grid_thw: Optional[torch.LongTensor] = None,          # 图片尺寸
         video_grid_thw: Optional[torch.LongTensor] = None,
         cache_position: Optional[torch.LongTensor] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> Union[tuple, output_cls]:
+        # 不训练 保持原有
         if not self.training and not is_deepspeed_enabled():
             return self.origin_forward(
                 input_ids=input_ids,
@@ -973,24 +989,33 @@ def _compat_qwen3_vl_mixed_data(model, processor, is_moe: bool = False):
                 **kwargs,
             )
 
+        # 输入有误
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError('You must specify exactly one of input_ids or inputs_embeds')
 
+        # 处理视觉输入
+        # inputs_embeds 是已经将视觉信息嵌入文本之后的输入序列
+        # visual_pos_masks维度是 L * 1
+        # deepstack_visual_embeds每层的特征输出
         inputs_embeds, visual_pos_masks, deepstack_visual_embeds = _forward_qwen3_vl_or_qwen3_omni(
             self, processor, input_ids, inputs_embeds, pixel_values, pixel_values_videos, image_grid_thw,
             video_grid_thw)
+
         if position_ids is None:
-            past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()
+            past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()     # KV cache长度
             if self.rope_deltas is None or past_key_values_length == 0:
+                # 初次计算旋转位置编码
+                # position_ids： 3 * B * L   3是因为有视频，每个embed切成3等分 时间 长度 宽度   文本会使用时间维度
                 position_ids, rope_deltas = self.get_rope_index(
                     input_ids,
                     image_grid_thw,
                     video_grid_thw,
                     attention_mask=attention_mask,
                 )
-                self.rope_deltas = rope_deltas
+                self.rope_deltas = rope_deltas                      # 全局偏移量
             # then use the prev pre-calculated rope-deltas to get the correct position ids
             else:
+                # 后续计算使用缓存的  只有文本输入
                 batch_size, seq_length, _ = inputs_embeds.shape
                 delta = (past_key_values_length + self.rope_deltas).to(inputs_embeds.device)
                 position_ids = torch.arange(seq_length, device=inputs_embeds.device)
@@ -1025,13 +1050,14 @@ def _compat_qwen3_vl_mixed_data(model, processor, is_moe: bool = False):
 
 class Qwen3VLLoader(Qwen2VLLoader):
 
+    # 版本检查
     def _check_qwen_vl_utils(self):
         require_version('qwen_vl_utils>=0.0.14')
         compat_qwen_vl_utils(image_patch_size=16)
 
     def get_model(self, model_dir: str, config, processor, model_kwargs) -> PreTrainedModel:
         from transformers import Qwen3VLForConditionalGeneration
-        self.auto_model_cls = self.auto_model_cls or Qwen3VLForConditionalGeneration
+        self.auto_model_cls = self.auto_model_cls or Qwen3VLForConditionalGeneration        # 用后者
         model = super().get_model(model_dir, config, processor, model_kwargs)
         _compat_qwen3_vl_mixed_data(model.model, processor)
         return model
@@ -1094,6 +1120,10 @@ register_model(
         architectures=['Qwen3VLMoeForConditionalGeneration'],
         requires=['transformers>=4.57', 'qwen_vl_utils>=0.0.14', 'decord'],
         tags=['vision', 'video']))
+
+
+
+
 
 
 class Qwen2_5OmniLoader(ModelLoader):

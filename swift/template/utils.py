@@ -225,16 +225,20 @@ def messages_to_history(messages: 'Messages') -> Dict[str, Any]:
     }
 
 
+# 修改生成配置的EOS  停止词变成id
 def update_generation_config_eos_token(generation_config, template):
     if generation_config is None:
         return
     stop_words = template.template_meta.stop_words
     eos_token_id = generation_config.eos_token_id
+
     if eos_token_id is None:
         eos_token_id = []
     elif isinstance(eos_token_id, int):
         eos_token_id = [eos_token_id]
+
     modified = False
+    # 停止词变成id
     for stop_word in stop_words:
         if stop_word is None:
             continue

@@ -72,7 +72,7 @@ class SwiftSft(SwiftPipeline, TunerMixin):
         template.set_mode('train')
         if template.use_model:                              # Qwen3 VL 是True
             template.model = self.model
-        support_padding_free = template.support_padding_free
+        support_padding_free = template.support_padding_free    # True
         if support_padding_free is None:
             support_padding_free = not args.model_meta.is_multimodal        # 多模态
         if (args.padding_free or args.packing) and not support_padding_free:
@@ -110,11 +110,12 @@ class SwiftSft(SwiftPipeline, TunerMixin):
             append_to_jsonl(val_dataset_path, val_dataset.to_list())
             logger.info(f'The split dataset from the training set will be saved at: {val_dataset_path}.')
 
+    # dataset类 展示数据集
     @RayHelper.function(group='default')
     def _prepare_dataset(self):
         args = self.args
         # Defer encoding to the training phase
-        pre_process = not (hasattr(args, 'rlhf_type') and args.rlhf_type in ['grpo', 'gkd'])
+        pre_process = not (hasattr(args, 'rlhf_type') and args.rlhf_type in ['grpo', 'gkd'])        # 除了GRPO 都是True
         if args.cached_dataset or args.cached_val_dataset:
             assert not args.streaming, 'Cached dataset does not support streaming.'
             train_datasets, val_datasets = get_cached_dataset(self.args)
@@ -134,11 +135,14 @@ class SwiftSft(SwiftPipeline, TunerMixin):
             logger.info(f'val_dataset: {val_dataset}')
         datasets = [train_dataset, val_dataset]
         if not pre_process:
+            # GRPO直接返回
             return datasets
+        # SFT还要进行后处理
         datasets = self._post_process_datasets(datasets)
         self._show_dataset(*datasets)
         return datasets
 
+    # 创建dataset类
     def _post_process_datasets(self, datasets: List) -> List:
         args = self.args
         predict_with_generate = getattr(args, 'predict_with_generate', False)
@@ -152,6 +156,7 @@ class SwiftSft(SwiftPipeline, TunerMixin):
                 continue
             if not args.streaming and args.truncation_strategy != 'split':
                 dataset = LazyLLMDataset(dataset, template.encode, strict=args.strict, random_state=args.data_seed)
+            # 训练数据长度负载均衡
             if args.packing:
                 packing_dataset_cls = IterablePackingDataset if args.streaming else PackingDataset
                 dataset = packing_dataset_cls(
@@ -183,12 +188,14 @@ class SwiftSft(SwiftPipeline, TunerMixin):
         args.save_args()
 
         # Some tuners require train_dataset and data_collator for preparation: LoRA-GA
+        # 设置微调方式 全量/lora 返回对应的模型（冻结 lora设置）
         self.model = self.prepare_model(self.args, self.model, template=self.template, train_dataset=train_dataset)
         logger.info(f'model: {self.model}')
         model_parameter_info = get_model_parameter_info(self.model)
         self.train_msg['model_parameter_info'] = model_parameter_info
         logger.info(f'model_parameter_info: {model_parameter_info}')
 
+        # 训练类
         trainer_cls = TrainerFactory.get_trainer_cls(args)
         trainer = trainer_cls(
             model=self.model,
@@ -254,6 +261,7 @@ class SwiftSft(SwiftPipeline, TunerMixin):
 
         return res
 
+    # 数据集长度信息
     @staticmethod
     def _stat_dataset(dataset: Union[HfDataset, PackingDataset, LazyLLMDataset]):
         if isinstance(dataset, LazyLLMDataset):
@@ -274,13 +282,15 @@ class SwiftSft(SwiftPipeline, TunerMixin):
             inputs = train_dataset[0] if hasattr(train_dataset, '__len__') else next(iter(train_dataset))
             if isinstance(inputs, list):
                 inputs = inputs[0]
-            self.template.print_inputs(inputs)
+            self.template.print_inputs(inputs)      # 展示样本输入
         elif hasattr(train_dataset, '__len__'):
             # Avoid the random mismatch issue in LazyLLMDataset.
             inputs = train_dataset[0]
         if val_dataset is not None and hasattr(val_dataset, '__len__') and len(val_dataset) == 0:
             val_dataset = None
+        # MLLM为True LLM为False 提前加载
         if not args.lazy_tokenize and not args.streaming:
+            # 统计数据集信息
             self.train_msg['train_dataset'] = self._stat_dataset(train_dataset)
             if val_dataset is not None and not predict_with_generate:
                 self.train_msg['val_dataset'] = self._stat_dataset(val_dataset)

@@ -79,13 +79,14 @@ class SwiftMixin:
         self.compute_loss_func = None  # Compatible with the older version of transformers
         self.template = template
 
-        self.is_encoder_decoder = self.template.is_encoder_decoder
-        self.padding_free = self.template.padding_free
+        self.is_encoder_decoder = self.template.is_encoder_decoder          # False
+        self.padding_free = self.template.padding_free                      # False
         self.task_type = self.template.task_type
-        self.problem_type = getattr(model.config, 'problem_type', None)
+        self.problem_type = getattr(model.config, 'problem_type', None)     # None
+        # 模型检查
         if args.check_model and hasattr(model, 'model_dir'):
             with ms_logger_context(logging.CRITICAL), self._patch_timeout():
-                config_info = self._collect_config_info()
+                config_info = self._collect_config_info()                   # SFT pt模式
                 config_info.update({
                     'invoked_by': 'local_trainer',
                     'third_party': 'swift',
@@ -112,13 +113,13 @@ class SwiftMixin:
         self.model_meta = model.model_meta
         self.model_info = model.model_info
 
-        data_collator = self._get_data_collator(args, template)
-        kwargs.update(self.create_loss_and_eval_metric(args))
+        data_collator = self._get_data_collator(args, template)         # 处理数据集方法
+        kwargs.update(self.create_loss_and_eval_metric(args))           # 处理指定的损失和指标 Qwen3VL 没有
         trainer_parameters = inspect.signature(HfTrainer.__init__).parameters
         tokenizer_key = 'processing_class' if 'processing_class' in trainer_parameters else 'tokenizer'
         kwargs[tokenizer_key] = template.tokenizer
         with self.hub.patch_hub():
-            super().__init__(
+            super().__init__(                                           # 调用父类初始化
                 model=model,
                 args=args,
                 data_collator=data_collator,
@@ -132,8 +133,10 @@ class SwiftMixin:
         self.label_names = self.label_names or ['labels']
         self.start_time = time.time()
         self._fix_gradient_checkpointing()
-        self.template.patch_model(model)
-        self._patch_tasks()
+        self.template.patch_model(model)                                # generative_reranker任务才会用
+        self._patch_tasks()                                             # 任务补丁 用不到
+
+        # 生成配置更新 添加停止词
         update_generation_config_eos_token(self.model.generation_config, self.template)
         if getattr(self.model, 'origin_generation_config', None):
             self.model.origin_generation_config.eos_token_id = self.model.generation_config.eos_token_id
@@ -142,6 +145,7 @@ class SwiftMixin:
             # so reading train_state is skipped here.
             self.args.resume_from_checkpoint = None
 
+    # 设置模板data_collator 方法
     def _get_data_collator(self, args, template):
         padding_to = template.max_length if args.tuner_type == 'longlora' else None
         return partial(template.data_collator, padding_to=padding_to)
@@ -168,6 +172,7 @@ class SwiftMixin:
         finally:
             HubApi.__init__ = __init__
 
+    # 返回sft还是pt模式
     def _collect_config_info(self) -> Dict[str, str]:
         """
         Collects trainer-specific configuration details.
@@ -227,6 +232,7 @@ class SwiftMixin:
         logger.info_once(f'use_logits_to_keep: {use_logits_to_keep}')
         return use_logits_to_keep
 
+    # 用于pissa/olora/lora-ga
     def _save_initial_model(self, output_dir):
         # pissa/olora/lora-ga
         model = unwrap_model(self.model)
@@ -653,6 +659,7 @@ class SwiftMixin:
         finally:
             Accelerator.clip_grad_norm_ = origin_clip_grad_norm_
 
+    # SFT GRPO用不到的补丁
     def _patch_tasks(self):
         if isinstance(self.model, PeftModel):
             model = self.model.model
@@ -800,6 +807,7 @@ class SwiftMixin:
 
                         model.forward = MethodType(reranker_forward, model)
 
+    # 打补丁 梯度检查点版本
     def _fix_gradient_checkpointing(self):
         # fix use_reentrant
         if hasattr(torch.utils.checkpoint, '_old_checkpoint'):  # avoid double patching
@@ -870,6 +878,7 @@ class SwiftMixin:
                     models.append(model)
 
             reward_model = getattr(self, 'reward_model', None)
+            # 奖励模型 无
             if reward_model is not None:
                 if isinstance(reward_model, list):
                     models.extend([m for m in reward_model if isinstance(m, nn.Module)])
@@ -879,7 +888,7 @@ class SwiftMixin:
             models = list(set(self.accelerator.unwrap_model(model) for model in models))  # Deduplicate
             self.template.register_post_encode_hook(models)
             logger.info(f'Successfully registered post_encode hook: {[model.__class__.__name__ for model in models]}.')
-        self._save_initial_model(self.args.output_dir)
+        self._save_initial_model(self.args.output_dir)          # 用于pissa/olora/lora-ga
 
         # gradient_checkpointing
         gradient_checkpointing = self.args.gradient_checkpointing
@@ -961,6 +970,7 @@ class SwiftMixin:
                 self.control.should_evaluate = False
         super()._maybe_log_save_evaluate(tr_loss, *args, **kwargs)
 
+    # 处理指定的损失、指标
     def create_loss_and_eval_metric(self, args):
         res = {}
         if args.eval_metric is not None:

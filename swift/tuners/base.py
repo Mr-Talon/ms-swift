@@ -694,9 +694,9 @@ class SwiftModel(nn.Module):
 class Swift:
     """The Wrapper to use both Peft and Swift tuners."""
 
+    # 获取peft model
     @staticmethod
-    def prepare_model(model: Union[nn.Module, SwiftModel], config: Union[SwiftConfig, PeftConfig,
-                                                                         Dict[str, SwiftConfig]], **kwargs):
+    def prepare_model(model: Union[nn.Module, SwiftModel], config: Union[SwiftConfig, PeftConfig, Dict[str, SwiftConfig]], **kwargs):
         """Prepare a model by the input config.
 
         Args:
@@ -712,6 +712,7 @@ class Swift:
         if isinstance(config, (SwiftConfig, dict)):
             return SwiftModel(model, config, **kwargs)
         else:
+            # peft使用这个
             return get_peft_model(model, config, **kwargs)
 
     @staticmethod

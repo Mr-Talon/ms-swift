@@ -32,26 +32,27 @@ class TemplateMeta:
         <|im_start|>assistant
         {{RESPONSE}}<|im_end|>  # suffix
     """
-    template_type: str
-    prefix: Prompt
-    prompt: Prompt
-    chat_sep: Optional[Prompt]
-    suffix: Prompt = field(default_factory=lambda: [['eos_token_id']])
-    template_cls: Type[Template] = Template
-    system_prefix: Optional[Prompt] = None
-    default_system: Optional[str] = None
+    template_type: str          # 模板类型 qwen3
+    prefix: Prompt              # []
+    prompt: Prompt              # ['<|im_start|>user\n{{QUERY}}<|im_end|>\n<|im_start|>assistant\n']
+    chat_sep: Optional[Prompt]  # ['<|im_end|>\n']
+    suffix: Prompt = field(default_factory=lambda: [['eos_token_id']])  # ['<|im_end|>\n']
+    template_cls: Type[Template] = Template         # 模板类 qwen3
+    system_prefix: Optional[Prompt] = None          # ['<|im_start|>system\n{{SYSTEM}}<|im_end|>\n']
+    default_system: Optional[str] = None            # 有赋值
 
-    auto_add_bos: bool = False
-    stop_words: List[Word] = field(default_factory=list)
-    agent_template: str = 'react_en'
+    auto_add_bos: bool = False                      # false
+    stop_words: List[Word] = field(default_factory=list)        # ['<|endoftext|>']
+    agent_template: str = 'react_en'                            # 'hermes'
     # thinking
     is_thinking: bool = False  # Automatically remove think content
-    thinking_prefix: str = ''
+    thinking_prefix: str = ''                                   # Qwen3  <think>\n
     non_thinking_prefix: str = ''  # Automatically add non_thinking_prefix for hybrid thinking models
     # During encoding, historical thinking content will be removed.
     # This parameter represents the prefix for the historical part.
     history_thinking_prefix: str = ''
 
+    # 转换成生成式模板 预训练任务
     def to_generate_template_meta(self) -> 'TemplateMeta':
         self = deepcopy(self)
         return TemplateMeta(
@@ -64,6 +65,7 @@ class TemplateMeta:
             stop_words=self.stop_words,
         )
 
+    # 是否具有系统提示
     @staticmethod
     def _has_system(prefix_or_prompt: Prompt) -> bool:
         return any(['{{SYSTEM}}' in p for p in prefix_or_prompt])
@@ -80,7 +82,7 @@ class TemplateMeta:
             assert x is None or isinstance(x, list)
 
     def __post_init__(self):
-        # system
+        # 系统提示
         if self._has_system(self.prefix):
             assert self.system_prefix is None, 'The prefix already contains {{SYSTEM}}.'
             self.system_prefix = self.prefix
@@ -99,6 +101,7 @@ class TemplateMeta:
 
         self.support_multi_round = self.chat_sep is not None
 
+    # 无变化 对eos_token_id默认值的编码，Qwen有赋值
     @staticmethod
     def _token_attr_to_id(tokenizer: PreTrainedTokenizerBase, value: Optional[Prompt]) -> Optional[Prompt]:
         """Turn `eos_token_id` to token id
@@ -114,12 +117,15 @@ class TemplateMeta:
             res_value.append(v)
         return res_value
 
+    # 处理停止token id
     def init(self, tokenizer: PreTrainedTokenizerBase) -> None:
+        # 无变化 处理双层列表
         for key in ['prefix', 'prompt', 'chat_sep', 'suffix', 'system_prefix']:
             value = getattr(self, key)
             value = self._token_attr_to_id(tokenizer, value)
             setattr(self, key, value)
 
+        # Qwen提出来是str  '<|im_end|>\n'
         suffix_stop = self.suffix[-1] if self.suffix else None
         if isinstance(suffix_stop, str):
             suffix_stop = suffix_stop.strip()
@@ -139,6 +145,7 @@ class TemplateMeta:
             if stop_token_id is not None:
                 self.stop_token_id = stop_token_id
 
+    # 检查系统提示是否为空
     def check_system(self, system: Optional[str]) -> None:
         if system is not None:
             assert self.support_system, (

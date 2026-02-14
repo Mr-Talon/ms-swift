@@ -159,6 +159,7 @@ def _add_gradient_checkpointing(module_list):
         module.__old_forward = __old_forward
 
 
+# 寻找tower里的模型层
 def find_module_list(model) -> Optional[nn.ModuleList]:
     module_lists = []
     for m in model.modules():
@@ -170,7 +171,7 @@ def find_module_list(model) -> Optional[nn.ModuleList]:
     if module_lists:
         return max(module_lists, key=lambda x: len(x))
 
-
+# 设置梯度检查点
 def dynamic_gradient_checkpointing(model, including_vit: bool = False) -> None:
     if isinstance(model, PeftModel):
         model = model.model
@@ -188,7 +189,7 @@ def dynamic_gradient_checkpointing(model, including_vit: bool = False) -> None:
             model_tower = model
         else:
             model_tower = deep_getattr(model, tower_name)
-        model_tower.supports_gradient_checkpointing = True
+        model_tower.supports_gradient_checkpointing = True           # 自定义模型支持这个吗？
         module_list = find_module_list(model_tower)
         if module_list is None:
             continue

@@ -16,6 +16,7 @@ from .utils import deep_getattr
 logger = get_logger()
 
 
+# 返回全部参数 和 可学习的参数
 def get_n_params_grads(model) -> Tuple[List[int], List[int]]:
     n_params, n_grads = [], []
     for p in model.parameters():
@@ -30,6 +31,7 @@ def get_n_params_grads(model) -> Tuple[List[int], List[int]]:
     return n_params, n_grads
 
 
+# 模型参数信息
 def get_model_parameter_info(model: nn.Module, name: Optional[str] = None) -> str:
     n_params, n_grads = get_n_params_grads(model)
     n_params = sum(n_params)
@@ -68,12 +70,14 @@ def show_layers(model: nn.Module, max_lines: Optional[int] = 20) -> None:
         logger.info(f'[{n}]: requires_grad={p.requires_grad}, dtype={p.dtype}, device={p.device}')
 
 
+# 冻结参数
 def freeze_parameters(model: nn.Module,
                       freeze_parameters_ratio: float,
                       freeze_parameters: List[str],
                       freeze_parameters_regex: Optional[str] = None) -> None:
+    # 按比例冻结
     if freeze_parameters_ratio > 0:
-        n_parameters = get_n_params_grads(model)[0]
+        n_parameters = get_n_params_grads(model)[0]         # 获取全部参数
         n_parameters = np.array(n_parameters, dtype=np.int64)
         n_freeze_parameters = int(np.sum(n_parameters) * freeze_parameters_ratio)
         n_parameters_cs = np.cumsum(n_parameters)
@@ -81,12 +85,14 @@ def freeze_parameters(model: nn.Module,
         for _, p in zip(range(idx), model.parameters()):
             p.requires_grad = False
 
+    # 冻结参数名称
     if freeze_parameters:
         for n, p in model.named_parameters():
             for freeze_p in freeze_parameters:
                 if n.startswith(freeze_p):
                     p.requires_grad = False
 
+    # 冻结正则表达式
     if freeze_parameters_regex is not None:
         try:
             pattern = re.compile(freeze_parameters_regex)
@@ -98,7 +104,7 @@ def freeze_parameters(model: nn.Module,
             if pattern.search(n):
                 p.requires_grad = False
 
-
+# 开启梯度回传
 def activate_parameters(model: nn.Module,
                         additional_trainable_parameters: List[str],
                         trainable_parameters_regex: Optional[str] = None) -> None:
@@ -114,6 +120,7 @@ def activate_parameters(model: nn.Module,
                            f'additional_trainable_parameters: {additional_trainable_parameters}')
 
     has_activate = False
+    # 按照正则表达式开启梯度
     if trainable_parameters_regex is not None:
         try:
             pattern = re.compile(trainable_parameters_regex)
@@ -165,6 +172,7 @@ def find_layers(
     return list(target_module_names)
 
 
+# 寻找LayerNorm
 def find_norm(model: nn.Module) -> List[str]:
     # find_layer_norm
     return find_layers(
@@ -172,10 +180,12 @@ def find_norm(model: nn.Module) -> List[str]:
         lambda name, module: isinstance(module, torch.nn.LayerNorm) or 'rmsnorm' in module.__class__.__name__.lower())
 
 
+# 寻找所有投影层
 def find_embedding(model: nn.Module) -> List[str]:
     return find_layers(model, lambda name, module: isinstance(module, torch.nn.Embedding))
 
 
+# 寻找所有线性层
 def find_all_linears(model, model_arch=None, extra_layers=None, sub_module=None):
     if model_arch is None:
         model_arch = model.model_meta.model_arch
@@ -205,6 +215,8 @@ def find_all_linears(model, model_arch=None, extra_layers=None, sub_module=None)
     return find_layers(model, _cond, sub_module=sub_module)
 
 
+# 返回一个正则表达式
+# MLLM 设置all-linear时 默认只对LLM增加lora【freeze_llm默认为F，freeze_vit默认为T，freeze_aligner默认为T】
 def get_multimodal_target_regex(
     model,
     *,

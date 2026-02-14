@@ -158,6 +158,7 @@ def get_model_list() -> List[str]:
     return models
 
 
+# 父类
 class ModelLoader(BaseModelLoader):
 
     def __init__(
@@ -251,6 +252,7 @@ class ModelLoader(BaseModelLoader):
             tokenizer = processor
         return tokenizer
 
+    # 被重写 会被子类调用
     def get_processor(self, model_dir: str, config: PretrainedConfig) -> Processor:
         auto_tokenizer_cls = self.auto_tokenizer_cls
         if auto_tokenizer_cls is None:
@@ -261,13 +263,14 @@ class ModelLoader(BaseModelLoader):
                 auto_tokenizer_cls = AutoTokenizer
         return auto_tokenizer_cls.from_pretrained(model_dir, trust_remote_code=True)
 
+    # 被重写 会被子类调用
     def get_model(self, model_dir: str, config: PretrainedConfig, processor: Processor,
                   model_kwargs) -> PreTrainedModel:
         if self.experts_impl is not None:
             model_kwargs['experts_implementation'] = self.experts_impl
         model_info = self.model_info
         model_meta = self.model_meta
-        auto_model_cls = self.auto_model_cls
+        auto_model_cls = self.auto_model_cls            # Qwen3 已赋值
         model = None
         # 默认task type是causal lm
         if model_info.task_type in {'seq_cls', 'reranker'} and auto_model_cls is None and not self.return_dummy_model:
@@ -279,7 +282,7 @@ class ModelLoader(BaseModelLoader):
                 except ValueError:
                     pass
 
-        # 默认AutoModelForCausalLM
+        # 默认AutoModelForCausalLM  Qwen是Qwen3VLForConditionalGeneration
         auto_model_cls = auto_model_cls or AutoModelForCausalLM
         context_kwargs = {
             'model_info': model_info,

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 TEMPLATE_MAPPING: Dict[str, TemplateMeta] = {}
 
 
+# 注册模板引用到map里
 def register_template(template_meta: TemplateMeta, *, exist_ok: bool = False) -> None:
     template_type = template_meta.template_type
     if not exist_ok and template_type in TEMPLATE_MAPPING:

@@ -61,13 +61,13 @@ class Template(ProcessorMixin):
     video_placeholder = ['<video>']
     audio_placeholder = ['<audio>']
     cot_process_placeholder = ['ки']
-    placeholder_tokens = []  # For clearer printing
+    placeholder_tokens = []  # For clearer printing         # ['<|image_pad|>', '<|video_pad|>']
     load_images = True
     skip_prompt = True
-    use_model = False
+    use_model = False                                       # True
     norm_bbox = 'norm1000'
     # For pure text models, the default is True; for multimodal models, the default is False.
-    support_padding_free = None
+    support_padding_free = None                             # True ？？？？？？
     jinja_enable_thinking_key = 'enable_thinking'
 
     is_encoder_decoder = False
@@ -114,28 +114,35 @@ class Template(ProcessorMixin):
         self.model = None
         self.dummy_model = None
 
+        # 默认为 True 预训练为False
         if not use_chat_template:
+            # 预训练
             template_meta = template_meta.to_generate_template_meta()
         else:
+            # 默认情况
             template_meta = deepcopy(template_meta)
         # if default_system is None. not change self.default_system
         template_meta.check_system(default_system)
         if default_system is not None:
             template_meta.default_system = default_system
+        # false
         if enable_thinking is None:
             enable_thinking = template_meta.is_thinking
+        # 都是''
         if response_prefix is None:
             if use_chat_template:
+                # 默认
                 response_prefix = (
                     template_meta.thinking_prefix if enable_thinking else template_meta.non_thinking_prefix)
             else:
+                # 预训练
                 response_prefix = ''
-        self.response_prefix = response_prefix
+        self.response_prefix = response_prefix                      # ‘’
         self.template_meta: 'TemplateMeta' = template_meta
         self.use_chat_template = use_chat_template
-        self.enable_thinking = enable_thinking
-        self.add_non_thinking_prefix = add_non_thinking_prefix
-        self.remove_unused_columns = remove_unused_columns
+        self.enable_thinking = enable_thinking                      # false
+        self.add_non_thinking_prefix = add_non_thinking_prefix      # True
+        self.remove_unused_columns = remove_unused_columns          # True
         self.template_backend = template_backend
         self.max_length = max_length
         self.truncation_strategy = truncation_strategy
@@ -162,12 +169,14 @@ class Template(ProcessorMixin):
         if processor is not None:
             self.init_processor(processor)
 
+    # 被重写 被子类调用 获取图片根目录
     def init_env_args(self):
         if self.model_meta.is_multimodal:
             self.root_image_dir = get_env_args('ROOT_IMAGE_DIR', str, None)
         else:
             self.root_image_dir = None
 
+    # 编码占位符 stop token
     def init_processor(self, processor: Processor) -> None:
         if processor is None or self._processor_inited:
             return
@@ -188,10 +197,11 @@ class Template(ProcessorMixin):
             logger.info(f'norm_bbox: {self.norm_bbox}')
         tokenizer = self.tokenizer
 
-        for i, token in enumerate(self.placeholder_tokens):
+        # 将占位符文本转换成id
+        for i, token in enumerate(self.placeholder_tokens):             # ['<|image_pad|>', '<|video_pad|>']
             if isinstance(token, str):
                 self.placeholder_tokens[i] = tokenizer.convert_tokens_to_ids(token)
-        self.template_meta.init(tokenizer)
+        self.template_meta.init(tokenizer)                              # 处理停止token id
         self.init_env_args()
 
     def _get_model(self):
@@ -371,6 +381,7 @@ class Template(ProcessorMixin):
             added_tokens_len += token_len - 1
         return input_ids, labels, loss_scale
 
+    # 被重写
     def forward_context(self, model, inputs):
         # This function is only used to handle scenarios where the model needs
         # to be patched during the forward pass.
@@ -586,6 +597,7 @@ class Template(ProcessorMixin):
                 encoded['_extra_kwargs'] = chosen.extra_kwargs
         return batched[0] if len(batched) == 1 else batched
 
+    # 被重写
     def packing_row(self, row: List[Dict[str, Any]]) -> Dict[str, Any]:
         packed = {}
         keys = set()
@@ -609,6 +621,7 @@ class Template(ProcessorMixin):
         packed.update(self._data_collator_mm_data(row))
         return packed
 
+    # 被重写
     def _post_encode(self, model: nn.Module, inputs: Dict[str, Any]) -> Dict[str, Any]:
         return inputs
 
@@ -799,9 +812,11 @@ class Template(ProcessorMixin):
                 loss_scale_res.append(loss_scale)
         return res, loss_scale_res
 
+    # 文本-》id
     def _tokenize(self, context, **kwargs):
         return self.tokenizer(context, return_attention_mask=False, add_special_tokens=False, **kwargs)['input_ids']
 
+    # 被重写
     def replace_tag(self, media_type: Literal['image', 'video', 'audio'], index: int,
                     inputs: StdTemplateInputs) -> List[Context]:
         """Override this function to do your own replace operation.
@@ -834,6 +849,7 @@ class Template(ProcessorMixin):
         elif media_type == 'audio':
             return self.audio_placeholder
 
+    # 被重写
     def replace_ref(self, ref: str, index: int, inputs: StdTemplateInputs) -> List[Context]:
         """Replace objects referenced by the bbox to contents or input_ids. This is useful in the grounding task.
         Override this function to do your own replace operation.
@@ -867,6 +883,7 @@ class Template(ProcessorMixin):
             point.append(f'({x},{y})')
         return ','.join(point)
 
+    # 被重写
     def replace_bbox(self, bbox: List[int], index: int, inputs: StdTemplateInputs) -> List[Context]:
         """Replace bbox pointing to the objects to contents or input_ids. This is useful in the grounding task.
         Override this function to do your own replace operation.
@@ -1340,6 +1357,7 @@ class Template(ProcessorMixin):
             encoded['loss_scale'] = loss_scale
         return encoded
 
+    # 被重写
     def _encode(self, inputs: StdTemplateInputs) -> Dict[str, Any]:
         inputs.messages = deepcopy(inputs.messages)
         template_backend = self.template_backend
@@ -1452,6 +1470,7 @@ class Template(ProcessorMixin):
     def post_process_generate_response(self, response: str, inputs: StdTemplateInputs) -> str:
         return response
 
+    # forward之前的操作
     def pre_forward_hook(self, model: nn.Module, args, kwargs):
         old_kwargs = to_device(kwargs, model.device)
         kwargs = to_device(self._post_encode(model, old_kwargs), model.device)
@@ -1480,6 +1499,7 @@ class Template(ProcessorMixin):
             logger.warning("The mode 'pt' is deprecated, please use 'transformers'.")
         self.mode = mode
 
+    # 多模态模型注册hook
     def register_post_encode_hook(self, models: List[nn.Module]) -> None:
         """This function is important for multi-modal training, as it registers the post_encode method
             as a forward hook, converting input_ids into inputs_embeds.
@@ -1710,6 +1730,7 @@ class Template(ProcessorMixin):
             res['labels'] = labels
         return res
 
+    # 被重写
     def _data_collator(self, batch: List[Dict[str, Any]], *, padding_to: Optional[int] = None) -> Dict[str, Any]:
         """
         Args:
@@ -1862,6 +1883,7 @@ class Template(ProcessorMixin):
 
         return result
 
+    # 被重写
     def _data_collator_mm_data(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         # multimodal
         res = {}
@@ -1903,6 +1925,7 @@ class Template(ProcessorMixin):
                 res[key] = value
         return res
 
+    # 展示样本
     def print_inputs(self, inputs: Dict[str, Any]) -> None:
         # Base keys to check
         tokenizer_kwargs = inputs.pop('tokenizer_kwargs', None) or {}
@@ -2152,6 +2175,7 @@ class Template(ProcessorMixin):
         text_position_ids = torch.arange(seq_len, device=position_ids.device).expand(1, *position_ids.shape[1:])
         return torch.concat([text_position_ids, position_ids], dim=0)
 
+    # generative_reranker补丁
     def _patch_generative_reranker(self, model):
         from swift.model import get_lm_head_model, patch_module_forward
         lm_head_model = get_lm_head_model(model).lm_head
@@ -2161,6 +2185,7 @@ class Template(ProcessorMixin):
 
         patch_module_forward(lm_head_model, lm_head_forward)
 
+    # generative_reranker补丁
     def patch_model(self, model):
         base_model = self.get_base_model(model)
         if self.task_type == 'generative_reranker':

@@ -17,6 +17,7 @@ from swift.utils import (activate_parameters, find_all_linears, find_embedding, 
 logger = get_logger()
 
 
+# 显存优化
 def apply_liger(model_type: str):
     try:
         from liger_kernel.transformers import (apply_liger_kernel_to_llama, apply_liger_kernel_to_mistral,
@@ -86,28 +87,34 @@ def apply_liger(model_type: str):
                           'by running `pip install -U liger-kernel`')
 
 
+# 微调方式 受到冻结参数影响
 def get_target_modules(args, model) -> Union[str, List[str]]:
     """Replace all-linear to actual modules"""
     if isinstance(args.target_modules, str):
         return args.target_modules
+    # 如果是列表 如输入--target_modules q_proj k_proj v_proj
     target_modules = args.target_modules.copy()
     if 'all-linear' in target_modules:
         if model.model_meta.is_multimodal:
+            # MLLM 只在LLM上增加LoRA
             return get_multimodal_target_regex(
                 model,
-                freeze_llm=args.freeze_llm,
+                freeze_llm=args.freeze_llm,                             # Lora且all-linear 表示llm不会附加lora参数    全参情况表示llm全部冻结
                 freeze_vit=args.freeze_vit,
                 freeze_aligner=args.freeze_aligner,
-                include_embedding='all-embedding' in target_modules)
+                include_embedding='all-embedding' in target_modules)    # 投影层
         else:
+            # LLM
             target_modules.remove('all-linear')
             target_modules += find_all_linears(model)
     if 'all-embedding' in target_modules:
+        # 投影层
         target_modules.remove('all-embedding')
         target_modules += find_embedding(model)
     return target_modules
 
 
+# 处理除了微调部分之外需要训练的参数
 def get_modules_to_save(args, model, task_type=None):
     modules_to_save = args.modules_to_save.copy()
     if 'all-embedding' in args.modules_to_save:
@@ -121,6 +128,7 @@ def get_modules_to_save(args, model, task_type=None):
     return modules_to_save
 
 
+# vera微调方法
 def get_vera_target_modules(model, config):
     """This function is only useful on the vera tuner"""
     target_modules = config.target_modules
@@ -141,11 +149,14 @@ def get_vera_target_modules(model, config):
     return config
 
 
+# 设置lora参数 修改model
 def prepare_adapter(args: SftArguments, model, *, template=None, train_dataset=None, task_type=None):
     from swift.tuners import (AdaLoraConfig, AdapterConfig, BOFTConfig, LLaMAProConfig, LongLoRAModelType, LoraConfig,
                               LoRAConfig, ReftConfig, Swift, VeraConfig)
     task_type = (task_type or args.task_type).upper()
+    # 返回微调方式字符串 或者正则表达式
     target_modules = get_target_modules(args, model)
+    # 处理除了微调方式控制的模块 还需要训练的模块
     modules_to_save = get_modules_to_save(args, model, task_type)
     lora_kwargs = {
         'r': args.lora_rank,
@@ -173,7 +184,7 @@ def prepare_adapter(args: SftArguments, model, *, template=None, train_dataset=N
                 task_type = 'CAUSAL_LM'
             if args.target_parameters is not None:
                 lora_kwargs['target_parameters'] = args.target_parameters
-            lora_config = LoraConfig(task_type=task_type, lora_dtype=args.lora_dtype, **lora_kwargs)
+            lora_config = LoraConfig(task_type=task_type, lora_dtype=args.lora_dtype, **lora_kwargs)    # lora配置项
             if args.init_weights == 'lora-ga':
                 try:
                     import lora_ga
@@ -197,7 +208,8 @@ def prepare_adapter(args: SftArguments, model, *, template=None, train_dataset=N
                     stable_gamma=args.lora_ga_stable_gamma,
                 )
             else:
-                model = Swift.prepare_model(model, lora_config)
+                # init weight默认为True
+                model = Swift.prepare_model(model, lora_config)     # 根据lora config修改模型
             logger.info(f'lora_config: {lora_config}')
         elif args.tuner_backend == 'unsloth':
             if args.resume_from_checkpoint is None:
@@ -322,16 +334,19 @@ class TunerMixin:
     def prepare_model(cls, args, model, *, template=None, train_dataset=None, task_type=None):
         # transformers >= 4.45.0, apply liger in transformers https://github.com/huggingface/transformers/pull/32860
         # transformers < 4.45.0, apply liger in here
+        # 显存优化策略
         if args.use_liger_kernel and 'use_liger_kernel' not in inspect.signature(TrainingArguments).parameters:
             # Apply liger
             apply_liger(args.model_type)
 
+        # 使用lora之类的部分参数微调
         if args.is_adapter:
             if args.tuner_backend != 'unsloth' and args.tuner_type not in tuners_map:
                 # Fix the name of the layer in xcomposer that contains Plora.
                 # Unsloth prepares and loads lora outside this function when
                 # resume_from_checkpoint, so do not disable grad here
                 model.requires_grad_(False)
+            # 断点
             if args.resume_from_checkpoint or args.adapters:
                 if args.tuner_type in tuners_map:
                     tuner: Tuner = tuners_map[args.tuner_type]
@@ -339,11 +354,13 @@ class TunerMixin:
                     tuner = Swift
                 assert not args.adapters or len(args.adapters) == 1, f'args.adapters: {args.adapters}'
                 model = tuner.from_pretrained(model, args.resume_from_checkpoint or args.adapters[0], is_trainable=True)
+            # 正常训练
             else:
                 if args.tuner_type in tuners_map:
                     tuner: Tuner = tuners_map[args.tuner_type]
                     model = tuner.prepare_model(args, model)
                 else:
+                    # lora相关
                     model = prepare_adapter(
                         args, model, template=template, train_dataset=train_dataset, task_type=task_type)
             # fix bug: Attempting to unscale FP16 gradients.
@@ -352,16 +369,21 @@ class TunerMixin:
                 if p.requires_grad and p.dtype == torch.float16:
                     logger.info_once('Convert trainable parameters from fp16 to fp32.')
                     p.data = p.data.to(dtype=torch.float32)
+
+        # 全量微调
         elif args.tuner_type == 'full':
             model.train()
             model.requires_grad_(True)
 
+            # 冻结的参数
             freeze_parameters(model, args.freeze_parameters_ratio, args.freeze_parameters, args.freeze_parameters_regex)
+            # 开启训练的参数
             if args.trainable_parameters or args.trainable_parameters_regex:
                 activate_parameters(model, args.trainable_parameters, args.trainable_parameters_regex)
         else:
             raise ValueError(f'args.tuner_type: {args.tuner_type}')
 
+        # 显存优化策略
         if args.use_galore:
             if args.galore_target_modules is None:
                 args.galore_target_modules = find_all_linears(model)

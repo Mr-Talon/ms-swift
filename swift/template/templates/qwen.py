@@ -301,6 +301,7 @@ class Qwen2VLTemplate(Template):
     use_model = True
     support_padding_free = True
 
+    # 获取图片根目录 bbox格式
     def init_env_args(self):
         super().init_env_args()
         self.transformers_version = version.parse(transformers.__version__)
@@ -352,6 +353,7 @@ class Qwen2VLTemplate(Template):
         else:
             return [str(bbox)]
 
+    # 被重写
     def _encode(self, inputs: StdTemplateInputs) -> Dict[str, Any]:
         encoded = super()._encode(inputs)
         processor = self.processor
@@ -408,6 +410,7 @@ class Qwen2VLTemplate(Template):
             from transformers.models.qwen2_5_omni import modeling_qwen2_5_omni as modeling_module
         return self._patch_flash_attention_forward(modeling_module, text_position_ids)
 
+    # 被重写
     def _post_encode(self, model, inputs: Dict[str, Any]) -> Dict[str, Any]:
         if not self.is_training:
             return inputs
@@ -550,6 +553,8 @@ class Qwen3VLTemplate(Qwen2VLTemplate):
 register_template(
     QwenTemplateMeta(
         MLLMTemplateType.qwen3_vl, template_cls=Qwen3VLTemplate, default_system=None, thinking_prefix='<think>\n'))
+
+
 
 
 class Qwen3VLEmbTemplate(Qwen3VLTemplate):
