@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 from swift.utils import to_device
 
-
+# 流式数据 用不到
 class DataLoaderDispatcher:
 
     def __init__(self, base_dataloader, device=None, skip_batches: int = 0):

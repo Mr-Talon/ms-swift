@@ -200,6 +200,7 @@ class SwiftMixin:
         return self.processing_class
 
     @contextmanager
+    # 防止训练中断
     def _patch_deepspeed_load_checkpoint(self):
         from transformers import trainer
         if not self.args.resume_from_checkpoint or not self.args.resume_only_model or not hasattr(
@@ -640,6 +641,7 @@ class SwiftMixin:
 
     @staticmethod
     @contextmanager
+    # 替换梯度归一化 nan-》None 让训练不崩
     def _fix_grad_norm_nan():
         from accelerate import Accelerator
         origin_clip_grad_norm_ = Accelerator.clip_grad_norm_
@@ -838,19 +840,27 @@ class SwiftMixin:
         except (ImportError, AttributeError):
             pass
 
+    # 梯度检查点 减少显存 训练变慢
     def _prepare_gradient_checkpointing(self, model) -> None:
         args = self.args
+        # 禁用KV cache
         HfConfigFactory.set_model_config_attr(model, 'use_cache', False)
+
+        # 视觉、文本动态梯度检查点
         if args.gradient_checkpointing or args.vit_gradient_checkpointing:
+            # 替换forward
             dynamic_gradient_checkpointing(model, args.vit_gradient_checkpointing)
         gc_kwargs = {}
         parameters = inspect.signature(model.gradient_checkpointing_enable).parameters
         if 'gradient_checkpointing_kwargs' in parameters:
             gc_kwargs['gradient_checkpointing_kwargs'] = args.gradient_checkpointing_kwargs
+
+        # 语言模型
         if args.gradient_checkpointing:
             model.gradient_checkpointing_enable(**gc_kwargs)
             model.enable_input_require_grads()
 
+        # 多模态部分
         model_meta = model.model_meta
         model_arch = model_meta.model_arch
         if model_meta.is_multimodal and model_arch:
@@ -886,17 +896,19 @@ class SwiftMixin:
                     models.append(reward_model)
 
             models = list(set(self.accelerator.unwrap_model(model) for model in models))  # Deduplicate
-            self.template.register_post_encode_hook(models)
+            self.template.register_post_encode_hook(models)     # 添加forward hook
             logger.info(f'Successfully registered post_encode hook: {[model.__class__.__name__ for model in models]}.')
         self._save_initial_model(self.args.output_dir)          # 用于pissa/olora/lora-ga
 
         # gradient_checkpointing
         gradient_checkpointing = self.args.gradient_checkpointing
         self._prepare_gradient_checkpointing(self.accelerator.unwrap_model(self.model))
+
+        # 训练的上下文环境 修复一些bug 创建dataloader
         with self.hub.patch_hub(), self._fix_grad_norm_nan(), self._patch_skip_first_batches(
         ), self._patch_deepspeed_load_checkpoint():
-            res = super().train(*args, **kwargs)
-        self.template.remove_post_encode_hook()
+            res = super().train(*args, **kwargs)                # 执行训练
+        self.template.remove_post_encode_hook()                 # 去除forward hook
         self.args.gradient_checkpointing = gradient_checkpointing  # recover
         return res
 
@@ -1126,6 +1138,7 @@ class SwiftMixin:
         return res_cu_seqlens
 
     @contextmanager
+    # 处理检查点恢复后 swift dataloader可能无法被正确跳过的问题
     def _patch_skip_first_batches(self):
         from transformers import trainer
         origin_skip_first_batches = trainer.skip_first_batches
@@ -1145,7 +1158,7 @@ class SwiftMixin:
 
 
 class DataLoaderMixin:
-
+    # 序列并行
     def get_sp_dataloader(self, dataset, batch_size, skip_batches=0):
 
         data_collator = self.data_collator
@@ -1188,6 +1201,7 @@ class DataLoaderMixin:
                 dataloader, sequence_parallel, self.accelerator.device, skip_batches=skip_batches)
             return dataloader
 
+    # 创建sampler daataloader
     def get_train_dataloader(self, skip_batches=0):
         dataloader = None
         if self.template.sequence_parallel_size > 1:
@@ -1218,14 +1232,17 @@ class DataLoaderMixin:
                 if args.deepspeed and 'tensor_parallel' in args.deepspeed else 1,
             }
 
+            # HFDataset 有len
             if hasattr(train_dataset, '__len__'):
                 if args.group_by_length:
                     batch_sampler_params['group_by_length'] = args.group_by_length
                     batch_sampler_params['lengths'] = train_dataset['lengths']
+                # batch采样器
                 batch_sampler = BatchSamplerShard(
                     len(train_dataset), batch_size=self._train_batch_size, **batch_sampler_params)
                 dataloader_params['worker_init_fn'] = partial(
                     seed_worker, num_workers=self.args.dataloader_num_workers, rank=self.args.process_index)
+                # skip batch操作
                 if skip_batches > 0:
                     from accelerate.data_loader import SkipBatchSampler
                     batch_sampler = SkipBatchSampler(batch_sampler, skip_batches=skip_batches)

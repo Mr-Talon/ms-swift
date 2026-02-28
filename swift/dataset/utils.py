@@ -56,6 +56,7 @@ def sample_dataset(
     return dataset
 
 
+# 常规数据集
 class LazyLLMDataset(Dataset):
     """This class if used to lazy tokenize the dataset, and skips bad ones when training"""
 
@@ -68,7 +69,7 @@ class LazyLLMDataset(Dataset):
                  random_state: Optional[Union[np.random.RandomState, int]] = None,
                  traceback_limit: int = 10) -> None:
         self.dataset = dataset
-        self.encode_func = encode_func
+        self.encode_func = encode_func              # template encode
 
         n_try_fetch = 1 if strict else min(n_try_fetch, len(self.dataset))
         assert n_try_fetch >= 1
@@ -92,11 +93,12 @@ class LazyLLMDataset(Dataset):
             if i == 0:
                 i = idx
             else:
+                # 失败了随机取
                 i = self._idx_list[self._idx]
                 self._idx = (self._idx + 1) % len(self.dataset)
             data = self.dataset[i]
             try:
-                return self.encode_func(data, return_length=True)
+                return self.encode_func(data, return_length=True)           # 处理数据集
             except Exception:
                 if n_try == self.n_try_fetch - 1 or self.strict:
                     if self.strict:
@@ -116,6 +118,7 @@ class LazyLLMDataset(Dataset):
         return len(self.dataset)
 
 
+# 流式数据集处理
 class EncodePreprocessor(RowPreprocessor):
 
     def __init__(self, template: 'Template'):
@@ -126,6 +129,7 @@ class EncodePreprocessor(RowPreprocessor):
         return self.template.encode(row, return_length=True)
 
 
+# 流式数据集处理
 class AddLengthPreprocessor(EncodePreprocessor):
 
     def preprocess(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:

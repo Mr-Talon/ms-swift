@@ -213,6 +213,7 @@ class Template(ProcessorMixin):
                 self.dummy_model = get_model_processor(self.model_info.model_dir, return_dummy_model=True)[0]
         return self.dummy_model
 
+    # 读取图片 路径-》二进制
     @staticmethod
     def _load_image(image, load_images: bool):
         if load_images:
@@ -230,6 +231,7 @@ class Template(ProcessorMixin):
                 image = load_image(image)
         return image
 
+    # 用于OD
     @staticmethod
     def _get_height_width(inputs: StdTemplateInputs) -> None:
         width = []
@@ -240,6 +242,7 @@ class Template(ProcessorMixin):
         inputs.objects['width'] = width
         inputs.objects['height'] = height
 
+    # OD任务
     def normalize_bbox(self, inputs: StdTemplateInputs) -> None:
         objects = inputs.objects
         bbox_list = objects['bbox']
@@ -262,6 +265,7 @@ class Template(ProcessorMixin):
                 bbox[2 * i] = int(round(x / width * norm_width))
                 bbox[2 * i + 1] = int(round(y / height * norm_height))
 
+    # agent相关的预处理 用不到
     def _preprocess_function_call(self, inputs: StdTemplateInputs) -> None:
         agent_template = self.agent_template
         agent_template.template_meta = self.template_meta  # for hermes
@@ -292,25 +296,29 @@ class Template(ProcessorMixin):
     def prepare_engine_kwargs(self) -> Dict[str, Any]:
         return {}
 
+    # 读取图片 路径-》二进制 文本中增加多出来的占位符
     def _preprocess_inputs(
         self,
         inputs: StdTemplateInputs,
     ) -> None:
+        # agent相关的预处理
         self._preprocess_function_call(inputs)
         if self.model_meta.is_multimodal:
             self._replace_image_tags(inputs)
             self._replace_start_image_tags(inputs)
 
         images = inputs.images
-        load_images = self.load_images or self.mode in {'vllm', 'lmdeploy'}
+        load_images = self.load_images or self.mode in {'vllm', 'lmdeploy'}     # True
         load_images_origin = load_images
         if self.max_pixels is not None or inputs.objects:
             load_images = True
         if images:
+            # 逐一读取图片
             for i, image in enumerate(images):
                 images[i] = self._load_image(images[i], load_images)
         if inputs.objects:
             self._get_height_width(inputs)
+        # 如果对图片像素有限制 这里是None
         if self.max_pixels is not None:
             # Scale the image proportionally without affecting the scaled objects.
             images = [rescale_image(img, self.max_pixels) for img in images]
@@ -328,6 +336,7 @@ class Template(ProcessorMixin):
             self._add_default_tags(inputs)
 
     @staticmethod
+    # 从文本中提取图片 用不到
     def _replace_image_tags(inputs: StdTemplateInputs):
         # compat
         if inputs.images:
@@ -347,17 +356,20 @@ class Template(ProcessorMixin):
             message['content'] = re.sub(pattern, '<image>', content)
         inputs.images = images
 
+    # 问题 生成回答 用不到
     @staticmethod
     def _replace_start_image_tags(inputs: StdTemplateInputs):
         # compat
         generate_mode = False
         message = inputs.messages[-1]
-        content = message['content']
+        content = message['content']    # 最后一段对话的回答
+        # 针对生成模式 对话的最后是人类的问题
         if message['role'] == 'user' and content.endswith('<start-image>'):
             generate_mode = True
             message['content'] = message['content'][:-len('<start-image>')]  # remove the <start-image>
         inputs.generate_mode = generate_mode
 
+    # image占位符空出image token的空间  label  loss权重对应增加
     @staticmethod
     def _extend_tokens(
             input_ids: List[int], labels: Optional[List[int]], loss_scale: Optional[List[float]],
@@ -366,19 +378,19 @@ class Template(ProcessorMixin):
         added_tokens_len = 0
         for i, idx in enumerate(replace_idx_list):
             try:
-                new_tokens = get_new_tokens(i)
+                new_tokens = get_new_tokens(i)      # 当前图片的占位符
             except IndexError as e:
                 logger.warning(f'IndexError occurs in the _extend_tokens function: {e}.')
                 continue
             token_len = len(new_tokens)
-            input_ids = input_ids[:idx + added_tokens_len] + new_tokens + input_ids[added_tokens_len + idx + 1:]
+            input_ids = input_ids[:idx + added_tokens_len] + new_tokens + input_ids[added_tokens_len + idx + 1:]        # 添加图片占位符
             if labels:
-                labels = labels[:idx + added_tokens_len] + [-100] * token_len + labels[added_tokens_len + idx + 1:]
+                labels = labels[:idx + added_tokens_len] + [-100] * token_len + labels[added_tokens_len + idx + 1:]     # label对应的增加
             if loss_scale:
                 scale_idx = loss_scale[idx + added_tokens_len]
-                loss_scale = loss_scale[:idx + added_tokens_len] + [scale_idx] * token_len + loss_scale[added_tokens_len
+                loss_scale = loss_scale[:idx + added_tokens_len] + [scale_idx] * token_len + loss_scale[added_tokens_len# loss权重对应增加
                                                                                                         + idx + 1:]
-            added_tokens_len += token_len - 1
+            added_tokens_len += token_len - 1   # 原始有一个位置
         return input_ids, labels, loss_scale
 
     # 被重写
@@ -517,6 +529,7 @@ class Template(ProcessorMixin):
             encoded['labels'] = labels
         return encoded
 
+    # 输入数据 输出编码后的结果 图片还未嵌入
     @torch.inference_mode()
     @retry_decorator(3)
     def encode(self,
@@ -534,18 +547,22 @@ class Template(ProcessorMixin):
         if isinstance(inputs, InferRequest):
             inputs = asdict(inputs)
 
+        # 转换数据形式
         if isinstance(inputs, dict):
             if self.task_type == 'causal_lm' and not self.is_training:
+                # 推理阶段 去除最后一个ai的回答
                 remove_response(inputs['messages'])
-            inputs = TemplateInputs.from_dict(inputs)
+            inputs = TemplateInputs.from_dict(inputs)       # 属性：字典的形式
         elif isinstance(inputs, TemplateInputs):
             inputs = deepcopy(inputs)
         assert isinstance(inputs, TemplateInputs)
 
-        chosen = inputs.chosen
+        chosen = inputs.chosen              # 常规的数据内容 不包含DPO的负样本
+
+        # 编码文本
         if self.task_type == 'causal_lm':
             if self.mode in {'train', 'transformers', 'vllm', 'lmdeploy', 'sglang'}:
-                encoded = self._encode_truncated(chosen)
+                encoded = self._encode_truncated(chosen)        # 变成成token id  增加图片位置  截断操作
             elif self.mode == 'rlhf':
                 encoded = self._rlhf_encode(inputs)
             elif self.mode == 'kto':
@@ -567,20 +584,20 @@ class Template(ProcessorMixin):
         else:
             raise ValueError(f'task_type: {self.task_type} is not supported.')
 
-        # compatible with `--truncation_strategy split`
+        # 下面是为了截断方式split实现的 对于正常情况没变化
         batched = encoded
         if not isinstance(batched, (list, tuple)):
             batched = [batched]
         for encoded in batched:
             if chosen.channel is not None:
                 encoded['channel'] = chosen.channel
-
             lengths = []
             for key in list(encoded.keys()):
+                # input id、length、label、loss scale
                 if encoded[key] is None:
                     encoded.pop(key)
                 elif key.endswith('length'):
-                    value = encoded[key]
+                    value = encoded[key]            # token序列长度
                     if isinstance(value, int):
                         lengths.append(value)
                     elif isinstance(value, (tuple, list)):
@@ -719,6 +736,7 @@ class Template(ProcessorMixin):
         generate_kwargs['stopping_criteria'] = StoppingCriteriaList([StopWordsCriteria(self.tokenizer, stop_words)])
         return generate_kwargs
 
+    # 本地数据用不到
     @staticmethod
     def _save_pil_image(image: Image.Image) -> str:
         img_bytes = image.tobytes()
@@ -731,18 +749,21 @@ class Template(ProcessorMixin):
             image.save(img_path)
         return img_path
 
+    # 替换模板中的占位符
     @staticmethod
     def _concat_context_list(
-            context_list: List[Context],
-            res_context_list: List[Context],  # inplace
-            res_context_type: List[ContextType],  # inplace
-            system: Optional[str] = None,
-            query: Optional[str] = None,
-            response: Optional[str] = None,
-            round0: Optional[int] = None) -> None:
+            context_list: List[Context],            # 模板        ['<|im_start|>system\n{{SYSTEM}}<|im_end|>\n']
+                                                            # ['<|im_start|>user\n{{QUERY}}<|im_end|>\n<|im_start|>assistant\n', {{RESPONSE}}]
+            res_context_list: List[Context],        # inplace    返回值 可能初始化的时候带有前缀
+            res_context_type: List[ContextType],    # inplace    每个返回值的类型
+            system: Optional[str] = None,           # 系统提示
+            query: Optional[str] = None,            # 用户问题
+            response: Optional[str] = None,         # ai回答
+            round0: Optional[int] = None) -> None:  # 轮次
         """Concat context list and replace placeholder"""
         round1 = None
         if round0 is not None:
+            # 第一次系统提示时None
             round1 = str(round0 + 1)
             round0 = str(round0)
         for context in context_list:
@@ -752,6 +773,7 @@ class Template(ProcessorMixin):
                     res_context_list.append(response)
                     res_context_type.append(ContextType.RESPONSE)
                     continue
+                # 替换占位符 {{SYSTEM}}
                 old_str_list = ['{{SYSTEM}}', '{{QUERY}}', '{{ROUND0}}', '{{ROUND1}}']
                 new_str_list = [system, query, round0, round1]
                 for (old_str, new_str) in zip(old_str_list, new_str_list):
@@ -763,12 +785,14 @@ class Template(ProcessorMixin):
             res_context_list.append(context)
             res_context_type.append(ContextType.OTHER)
 
+    # 替换image标签成标准形式 合并loss相同的字符串
     def _simplify_context_list(self, context_list: List[Context], loss_scale_list: List[float],
                                inputs: StdTemplateInputs) -> Tuple[List[Context], List[float]]:
         """Merge anything in the context to simplify the inputs"""
-        context_list, loss_scale_list = self._split_special_tokens(context_list, loss_scale_list)
-        context_list, loss_scale_list = self._pre_tokenize(context_list, loss_scale_list, inputs)
+        context_list, loss_scale_list = self._split_special_tokens(context_list, loss_scale_list)       # 列表中再按占位符拆分
+        context_list, loss_scale_list = self._pre_tokenize(context_list, loss_scale_list, inputs)       # image占位符替换成标准形式 input内的图片预处理
 
+        # 合并loss相同的成一个字符串元素
         res: List[Context] = []  # result of context_list
         res_loss_scale: List[float] = []  # result of loss_scale_list
         temp: List[str] = []
@@ -793,6 +817,7 @@ class Template(ProcessorMixin):
 
         return res, res_loss_scale
 
+    # 拆分特殊占位符 image 形成更细碎的列表
     @staticmethod
     def _split_special_tokens(context_list: List[Context],
                               loss_scale_list: List[float]) -> Tuple[List[Context], List[float]]:
@@ -802,11 +827,12 @@ class Template(ProcessorMixin):
         for context, loss_scale in zip(context_list, loss_scale_list):
             contexts = []
             if isinstance(fetch_one(context), str):
+                # 每一段对话内容 拆分成： 分隔符+内容 分隔符+内容 的形式  最后变成一个列表
                 for d in split_str_parts_by(context, Template.special_tokens):
                     contexts.extend([d['key'], d['content']])
                 contexts = [c for c in contexts if c]
                 res.extend(contexts)
-                loss_scale_res.extend([loss_scale] * len(contexts))
+                loss_scale_res.extend([loss_scale] * len(contexts))     # 数量扩增
             else:
                 res.append(context)
                 loss_scale_res.append(loss_scale)
@@ -864,6 +890,7 @@ class Template(ProcessorMixin):
         """
         return [ref]
 
+    # 未用到
     def replace_cot_process(self, inputs: StdTemplateInputs) -> List[Context]:
         """Replace the cot process label for PRM training or inference.
         Override this function to do your own replace operation.
@@ -876,6 +903,7 @@ class Template(ProcessorMixin):
         """
         return [self.cot_process_placeholder]
 
+    # OD
     @staticmethod
     def _get_bbox_str(bbox: List[int]) -> str:
         point = []
@@ -898,6 +926,7 @@ class Template(ProcessorMixin):
         """
         return [f'[{self._get_bbox_str(bbox)}]']
 
+    # 将images占位符替换成统一形式
     def _pre_tokenize_images(self, context_list: List[Context], loss_scale_list: List[float],
                              inputs: StdTemplateInputs) -> Tuple[List[Context], List[float]]:
         # https://github.com/modelscope/ms-swift/issues/3407
@@ -908,7 +937,8 @@ class Template(ProcessorMixin):
 
         for context, loss_scale in zip(context_list, loss_scale_list):
             if context == '<image>' and inputs.is_multimodal and inputs.image_idx < len(inputs.images):
-                c_list = self.replace_tag('image', inputs.image_idx, inputs)
+                # 图片占位符
+                c_list = self.replace_tag('image', inputs.image_idx, inputs)        # ['<|vision_start|><|image_pad|><|vision_end|>']  预处理了input中的图片
                 inputs.image_idx += 1
                 loss_scale = 0. if self.template_backend == 'swift' else 1.
             else:
@@ -917,6 +947,7 @@ class Template(ProcessorMixin):
             res_loss_scale += [loss_scale] * len(c_list)
         return res, res_loss_scale
 
+    # image占位符替换成统一形式 还有对OD等内容的处理
     def _pre_tokenize(self, context_list: List[Context], loss_scale_list: List[float],
                       inputs: StdTemplateInputs) -> Tuple[List[Context], List[float]]:
         """This method happens before tokenization, replace standard tags to the contents or input_ids needed by
@@ -928,7 +959,9 @@ class Template(ProcessorMixin):
         Returns:
             The context_list and loss_scale_list after replacement.
         """
+        # 处理image标签  换成 ['<|vision_start|><|image_pad|><|vision_end|>']
         context_list, loss_scale_list = self._pre_tokenize_images(context_list, loss_scale_list, inputs)
+
         if inputs.images and inputs.objects:
             self.normalize_bbox(inputs)
         # replace tag/object/box
@@ -966,6 +999,7 @@ class Template(ProcessorMixin):
             res_loss_scale += [loss_scale] * len(c_list)
         return res, res_loss_scale
 
+    # 多出来的图片 在文本中增加占位符
     @staticmethod
     def _add_default_tags(inputs: StdTemplateInputs):
         total_content = []
@@ -983,20 +1017,22 @@ class Template(ProcessorMixin):
             total_content = f'{inputs.system}\n{total_content}'
         for media_type in ['image', 'audio', 'video']:
             media_key, media_tag = f'{media_type}s', f'<{media_type}>'
-            medias = getattr(inputs, media_key)
+            medias = getattr(inputs, media_key)     # 获取图片
             if not isinstance(medias, list):
                 medias = [medias]
             if medias:
-                num_media_tags = len(re.findall(media_tag, total_content))
-                num_media = len(medias)
+                num_media_tags = len(re.findall(media_tag, total_content))  # 文本中的图像标签数量
+                num_media = len(medias)     # 总共的数量
                 num_new_tags = num_media - num_media_tags
                 if num_new_tags > 0:
+                    # 多的图片 放在最前面 顺序问题
                     inputs.messages[0]['content'] = media_tag * num_new_tags + inputs.messages[0]['content']
                 elif num_new_tags < 0:
                     logger.warning(
                         f'num_media: {num_media}, num_media_tags: {num_media_tags}, total_content: {total_content}. '
                         'We will only replace the frontmost media_tags while keeping the subsequent media_tags.')
 
+    # 文本-》token id  label单列
     def _encode_context_list(self,
                              context_list: List[Context],
                              loss_scale_list: Optional[List[float]] = None) -> Tuple[List[int], List[int], List[float]]:
@@ -1005,6 +1041,8 @@ class Template(ProcessorMixin):
         loss_scale: List[float] = []
         if loss_scale_list is None:
             loss_scale_list = [0.] * len(context_list)
+
+        # 每个字符串转成token id
         for i, (context, loss_weight) in enumerate(zip(context_list, loss_scale_list)):
             if isinstance(context, str):
                 token_list = self._tokenize(context)
@@ -1014,13 +1052,15 @@ class Template(ProcessorMixin):
             if loss_scale_list[i] > 0.0:
                 labels += token_list
             else:
+                # 非标签 -100
                 labels += [-100] * len(token_list)
-            if not self.loss_scale.is_loss_scale_binary:
+            if not self.loss_scale.is_loss_scale_binary:            # is_loss_scale_binary True
                 loss_scale.extend([loss_weight] * len(token_list))
         if self.loss_scale.is_loss_scale_binary:
             loss_scale = None
         return input_ids, labels, loss_scale
 
+    # 恢复EOS的loss计算
     @staticmethod
     def _add_dynamic_eos(input_ids: List[int], labels: List[int], loss_scale: Optional[List[int]],
                          suffix_tokens_id: List[int]) -> None:
@@ -1038,12 +1078,14 @@ class Template(ProcessorMixin):
                         loss_scale[start:start + suffix_len] = [1] * suffix_len
 
     @staticmethod
+    # 对话应该是双数 由人类开启
     def _get_std_messages(messages):
         if messages and messages[0]['role'] == 'assistant':
             messages.insert(0, {'role': 'user', 'content': ''})  # pretrain
         if len(messages) % 2 == 1:
             messages.append({'role': 'assistant', 'content': None})  # inference
 
+    # 非swift backend
     def _jinja_encode(self, inputs: StdTemplateInputs):
         messages = inputs.messages.copy()
         if inputs.system is not None:
@@ -1063,9 +1105,10 @@ class Template(ProcessorMixin):
         answer_len = 1 if self.is_training else 0
         return [text], [1.], answer_len
 
+    # 没给system用默认的 否则用提供的
     def _get_system(self, inputs: StdTemplateInputs) -> Optional[str]:
         template_meta = self.template_meta
-        system = inputs.system
+        system = inputs.system      # None
         tools = inputs.tools
         template_meta.check_system(system)
         if system is None:
@@ -1075,19 +1118,23 @@ class Template(ProcessorMixin):
             system = self.agent_template._format_tools(tools, system, inputs.messages[0])
         return system
 
+    # 判断是否是需要增加前缀的对话轮次
     def _is_add_non_thinking_round(self, messages, i: int, start_idx: int):
         message = messages[i]
+        # 在范围内 且 ai说话
         return i >= start_idx and message['role'] == 'assistant'
 
+    # 增加非思考前缀
     def _add_non_thinking_prefix(self, inputs) -> None:
         messages = inputs.messages
-        non_thinking_prefix = self.template_meta.non_thinking_prefix
+        non_thinking_prefix = self.template_meta.non_thinking_prefix        # ''
         if non_thinking_prefix:
             # Determine the starting index for processing messages
             # During inference or when using 'last_round' strategy, only process the last round
             # Otherwise, process all messages (start_idx = -1 means start from the beginning)
             if not self.is_training or self.loss_scale.base_strategy == 'last_round':
-                start_idx = get_last_user_round(messages)
+                # 推理阶段或者只算最后一个回答的loss
+                start_idx = get_last_user_round(messages)           # 最后一个user发言在对话列表的索引
             else:
                 start_idx = -1
             for i, message in enumerate(messages):
@@ -1098,10 +1145,12 @@ class Template(ProcessorMixin):
                     # prepend the non_thinking_prefix to the content.
                     message['content'] = non_thinking_prefix + message['content']
 
+    # 去除思考部分
     def _remove_thinking_content(self, content: str) -> str:
         content = content.split('</think>')[-1].strip()
         return self.template_meta.history_thinking_prefix + content
 
+    # 去除之前轮次的思考 用于计算最后一个损失是情况
     def _remove_history_thinking(self, inputs) -> None:
         if self.is_training and self.loss_scale.base_strategy != 'last_round':
             return
@@ -1114,6 +1163,7 @@ class Template(ProcessorMixin):
             if message['role'] == 'assistant' and isinstance(message['content'], str) and i < last_user_round:
                 message['content'] = self._remove_thinking_content(message['content'])
 
+    # 合并同一个对话者的内容
     def _swift_prepare_inputs(self, inputs: StdTemplateInputs):
         """
         Preprocesses the list of messages in the input by merging and formatting consecutive messages
@@ -1134,6 +1184,7 @@ class Template(ProcessorMixin):
         """
         messages = inputs.messages
         if len(messages) < 2:
+            # 没有对话直接返回
             return
         i = 1
         while i < len(messages):
@@ -1156,15 +1207,20 @@ class Template(ProcessorMixin):
             else:
                 i += 1
 
+    # 在模板中 加入系统提示和每一轮对话 列表形式 输出list和每个对话元素对应的损失权重
     def _swift_encode(self, inputs: StdTemplateInputs):
+        # 处理think和之前对话轮次的think
         template_meta = self.template_meta
         if self.use_chat_template:
             if self.add_non_thinking_prefix:
-                self._add_non_thinking_prefix(inputs)
+                self._add_non_thinking_prefix(inputs)               # 无操作
+            # 去除历史推理
             if template_meta.is_thinking or self.enable_thinking:
                 self._remove_history_thinking(inputs)
-        system = self._get_system(inputs)
 
+        system = self._get_system(inputs)                           # 获取系统提示
+
+        # 处理全部对话
         self._get_std_messages(inputs.messages)
         n_round = len(inputs.messages) // 2
         if n_round > 1 and not self.template_meta.support_multi_round:
@@ -1172,10 +1228,10 @@ class Template(ProcessorMixin):
                 'The template does not support multi-round chat. Only use the last round of the conversation.')
             # TODO: Multimodal models may encounter image mismatch issues.
             inputs.messages = inputs.messages[-2:]
-
         res_context_list: List[Context] = []
         res_context_types: List[ContextType] = []
         sep_token = None
+        # qwen false
         if template_meta.auto_add_bos:
             all_tokens = self.tokenizer.encode('a')
             single_token = self.tokenizer.encode('a', add_special_tokens=False)
@@ -1187,14 +1243,17 @@ class Template(ProcessorMixin):
                 res_context_list.append(bos_token)
                 res_context_types.append(ContextType.OTHER)
 
+        # 系统提示
         if self.template_meta.is_post_system or not system:
             prefix = template_meta.prefix
         else:
-            prefix = template_meta.system_prefix
-        self._concat_context_list(prefix, res_context_list, res_context_types, system=system)
+            prefix = template_meta.system_prefix            # ['<|im_start|>system\n{{SYSTEM}}<|im_end|>\n']
+        self._concat_context_list(prefix, res_context_list, res_context_types, system=system)   # 替换系统提示占位符  结果在res_context_list
 
         assert len(inputs.messages) > 0, f'inputs.messages: {inputs.messages}'
         n_round = len(inputs.messages) // 2
+
+        # 处理每一个问答对
         for i, (query_message, response_message) in enumerate(zip(inputs.messages[::2], inputs.messages[1::2])):
             query_role, query = query_message['role'], query_message['content']
             response_role, response = response_message['role'], response_message['content']
@@ -1207,19 +1266,22 @@ class Template(ProcessorMixin):
             elif template_meta.is_post_system and i == n_round - 1:
                 prompt = template_meta.system_prompt
             else:
-                prompt = template_meta.prompt
+                prompt = template_meta.prompt               # ['<|im_start|>user\n{{QUERY}}<|im_end|>\n<|im_start|>assistant\n']
 
             context_list = prompt.copy()
             extra_context_list = []
             extra_context_type = None
+
+            # 添加占位符
             if i < n_round - 1:
-                # Not the last round.
-                context_list.append('{{RESPONSE}}')
+                # 非最后一次回答 增加占位符
+                context_list.append('{{RESPONSE}}')         # ['<|im_start|>user\n{{QUERY}}<|im_end|>\n<|im_start|>assistant\n', '{{RESPONSE}}']
                 if inputs.messages[2 * (i + 1)]['role'] != 'tool':
-                    extra_context_list = template_meta.chat_sep
+                    # 下一个回答不是agent工具
+                    extra_context_list = template_meta.chat_sep     # ['<|im_end|>\n']
                     extra_context_type = ContextType.OTHER
             elif response is not None:
-                # It is the final round, and the response exists (during training).
+                # 最后一轮 如果有回答 增加占位符和eos
                 context_list.append('{{RESPONSE}}')
                 # The GLM-4.5 assistant part (tool call) may end with <|observation|>,
                 # and here we avoid adding <|user|>.
@@ -1230,22 +1292,26 @@ class Template(ProcessorMixin):
                     else:
                         token_ids = response['token_ids']
                     response_content = self.tokenizer.decode(token_ids[-20:])
+                # 回答是不是用停止词结尾的  False
                 endswith_stop_words = any(
                     response_content.endswith(stop_word) for stop_word in template_meta.stop_words
                     if isinstance(stop_word, str))
                 # self.is_training needed because we may want to continue generation from
                 # the current response
                 add_eos = inputs.extra_kwargs.get('add_eos')
+                # 添加eos
                 if add_eos is None:
                     add_eos = (self.is_training
                                or self.task_type != 'causal_lm') and not sep_token and not endswith_stop_words
                 if add_eos:
-                    extra_context_list = template_meta.suffix
+                    extra_context_list = template_meta.suffix       # ['<|im_end|>\n']
                     extra_context_type = ContextType.SUFFIX
+            # ''
             elif self.response_prefix:
                 # final round and during inference.
                 context_list.append(self.response_prefix)
 
+            # 替换对话中的占位符 增加结束符
             self._concat_context_list(
                 context_list,
                 res_context_list,
@@ -1254,19 +1320,23 @@ class Template(ProcessorMixin):
                 response=response,
                 system=system,
                 round0=i)
-            res_context_list += extra_context_list
-            res_context_types += [extra_context_type] * len(extra_context_list)
+            res_context_list += extra_context_list          # 字符串list   sys q r eos q r eos q r eos
+            res_context_types += [extra_context_type] * len(extra_context_list)     # 每个字符串类型的 list   O O R O O R O O R S
         if template_meta.auto_add_bos and sep_token:
             res_context_list.append(sep_token)
             res_context_types.append(ContextType.SUFFIX)
+
+        # 获取对话中每个部分的损失权重，default情况，没有指定loss，每一轮的回答都有相同的权重
         res_context_list, loss_scale_list = self.loss_scale(res_context_list, res_context_types, inputs.messages,
                                                             **inputs.extra_kwargs)
         if self.is_training:
+            # 最后一个是EOS和最后的回答  SFT为2 GRPO为0
             answer_len = len(extra_context_list) + bool(response is not None)
         else:
             answer_len = 0
         return res_context_list, loss_scale_list, answer_len
 
+    # 输入截断操作 默认是raise不会截断
     def _truncate(self, input_ids: List[int], labels: Optional[List[int]], loss_scale: Optional[List[float]],
                   truncation_strategy: Literal['left', 'right']):
         placeholder_tokens = torch.tensor(self.placeholder_tokens)
@@ -1289,6 +1359,7 @@ class Template(ProcessorMixin):
             loss_scale[0] = 0
         return input_ids, labels, loss_scale
 
+    # 获取input id的长度
     @staticmethod
     def _get_length(input_ids, labels):
         # input_ids might be a tensor.
@@ -1300,8 +1371,9 @@ class Template(ProcessorMixin):
         length = max(lengths)
         return length
 
+    # 编码文本 空出图片长度 截断
     def _encode_truncated(self, inputs: StdTemplateInputs):
-        self._preprocess_inputs(inputs)
+        self._preprocess_inputs(inputs)         # 图片读取 文本中对多出来的图片增加占位符
         if self.mode in {'vllm', 'lmdeploy', 'sglang'}:
             # For multi-modal models, images do not need to be pre processed here
             # vllm/lmdeploy/sglang will handle the logic
@@ -1314,7 +1386,7 @@ class Template(ProcessorMixin):
                 if value:
                     encoded[key] = value
         else:
-            encoded = self._encode(inputs)
+            encoded = self._encode(inputs)      # 变成input id 为图片空出位置
         input_ids = encoded.get('input_ids')
         labels = encoded.get('labels')
         loss_scale = encoded.get('loss_scale')
@@ -1357,15 +1429,18 @@ class Template(ProcessorMixin):
             encoded['loss_scale'] = loss_scale
         return encoded
 
-    # 被重写
+    # 被子类调用 将文本变成token id
     def _encode(self, inputs: StdTemplateInputs) -> Dict[str, Any]:
         inputs.messages = deepcopy(inputs.messages)
         template_backend = self.template_backend
+        # 推理
         if (self.template_meta.template_type == 'dummy' and self.use_chat_template and not self.is_training
                 and self.task_type == 'causal_lm'):
             template_backend = 'jinja'
             logger.info_once(f'Setting template_backend: {template_backend}')
-        self._swift_prepare_inputs(inputs)
+
+        self._swift_prepare_inputs(inputs)              # 合并同一个对话者的内容
+        # 将对话内容输入模板 转换成list 每个对话元素对应的损失权重 以及最终回答的长度 SFT 2 GRPO 0
         res_context_list, loss_scale_list, answer_len = (
             self._swift_encode(inputs) if template_backend == 'swift' else self._jinja_encode(inputs))
         encoded = {}
@@ -1386,8 +1461,11 @@ class Template(ProcessorMixin):
             if isinstance(encoded['prompt_loss_scale'], list):
                 loss_scale = encoded['prompt_loss_scale'] + encoded['answer_loss_scale']
         else:
+            # 转换image占位符 合并loss相同的字符串
             res_context_list, loss_scale_list = self._simplify_context_list(res_context_list, loss_scale_list, inputs)
+            # 转换成token id
             input_ids, labels, loss_scale = self._encode_context_list(res_context_list, loss_scale_list)
+        # 恢复EOS的loss计算
         self._add_dynamic_eos(input_ids, labels, loss_scale, self._encode_context_list(self.template_meta.suffix)[0])
 
         encoded['input_ids'] = input_ids
@@ -1470,16 +1548,18 @@ class Template(ProcessorMixin):
     def post_process_generate_response(self, response: str, inputs: StdTemplateInputs) -> str:
         return response
 
-    # forward之前的操作
+    # forward之前的操作 替换输入的内容 inputs_embeds/input_ids
     def pre_forward_hook(self, model: nn.Module, args, kwargs):
         old_kwargs = to_device(kwargs, model.device)
-        kwargs = to_device(self._post_encode(model, old_kwargs), model.device)
+        kwargs = to_device(self._post_encode(model, old_kwargs), model.device)      # 对输入input 无处理
+        # 补齐
         for k, v in old_kwargs.items():
             if k in {
                     'input_ids', 'attention_mask', 'labels', 'position_ids', 'output_hidden_states', 'logits_to_keep',
                     'max_length_q', 'max_length_k', 'cu_seq_lens_q', 'cu_seq_lens_k'
             } and k not in kwargs:
                 kwargs[k] = v
+        # 去重
         if 'inputs_embeds' in kwargs:
             kwargs.pop('input_ids', None)
 
@@ -1499,7 +1579,7 @@ class Template(ProcessorMixin):
             logger.warning("The mode 'pt' is deprecated, please use 'transformers'.")
         self.mode = mode
 
-    # 多模态模型注册hook
+    # 多模态模型注册  pre_forward_hook
     def register_post_encode_hook(self, models: List[nn.Module]) -> None:
         """This function is important for multi-modal training, as it registers the post_encode method
             as a forward hook, converting input_ids into inputs_embeds.
@@ -1525,6 +1605,7 @@ class Template(ProcessorMixin):
 
             deepspeed.initialize = _initialize
 
+    # 去除 forward hook
     def remove_post_encode_hook(self):
         models = []
         for model, handle in self._handles:
@@ -1538,6 +1619,7 @@ class Template(ProcessorMixin):
         self._deepspeed_initialize = None
         return models
 
+    # 组成batch的类
     def data_collator(self, batch: List[Dict[str, Any]], *, padding_to: Optional[int] = None) -> Dict[str, Any]:
         from swift.dataset import RowPreprocessor
         if self.packing and isinstance(batch[0], list):
@@ -1730,7 +1812,7 @@ class Template(ProcessorMixin):
             res['labels'] = labels
         return res
 
-    # 被重写
+    # 被子类调用 将数据组成batch 创建attention mask
     def _data_collator(self, batch: List[Dict[str, Any]], *, padding_to: Optional[int] = None) -> Dict[str, Any]:
         """
         Args:
@@ -1738,6 +1820,7 @@ class Template(ProcessorMixin):
             padding_to(`int`, optional): Whether padding the batch to a fixed length, if none, the batch
                 will be padded to the `longest`
         """
+        # padding to None
         assert self.tokenizer.pad_token_id is not None
         padding_side = self.padding_side if self.is_training else 'left'
         padding_right = padding_side == 'right'
@@ -1758,9 +1841,10 @@ class Template(ProcessorMixin):
                 if v is not None:
                     res[k] = v if k == 'channel' else [v]
         else:
-            inputs_embeds = [b['inputs_embeds'] for b in batch if b.get('inputs_embeds') is not None]
-            input_ids = [b['input_ids'] for b in batch if b.get('input_ids') is not None]
-            channel = [b.get('channel') for b in batch]
+            # 填入数据
+            inputs_embeds = [b['inputs_embeds'] for b in batch if b.get('inputs_embeds') is not None]       # None 除非输入的特征
+            input_ids = [b['input_ids'] for b in batch if b.get('input_ids') is not None]       # 一般是这个
+            channel = [b.get('channel') for b in batch]         # None
 
             if inputs_embeds:
                 res['inputs_embeds'] = inputs_embeds
@@ -1775,21 +1859,22 @@ class Template(ProcessorMixin):
                     res[key] = val
 
         keys = [
-            'input_ids',
+            'input_ids',            # 1
             'inputs_embeds',
-            'attention_mask',
-            'labels',
+            'attention_mask',       # 后续会创建
+            'labels',               # 1
             'loss_scale',
             'position_ids',
             'token_type_ids',
             'attention_mask_2d',
         ]
-        pad_values = [self.tokenizer.pad_token_id, 0., 0, -100, 0., 0., 0, 0]
+        pad_values = [self.tokenizer.pad_token_id, 0., 0, -100, 0., 0., 0, 0]       # 每个数据属性对于的填充元素
         # Convert to tensor and remove unnecessary dimensions.
         seq_lens = None
         for key in keys:
             if key not in res:
                 continue
+            # 转换成tensor
             for i, val in enumerate(res[key]):
                 if isinstance(val, (list, tuple)):
                     val = torch.tensor(val)
@@ -1797,7 +1882,9 @@ class Template(ProcessorMixin):
                     val = val[0]
                 res[key][i] = val
             if not seq_lens:
-                seq_lens = [seq.shape[0] for seq in res[key]]
+                seq_lens = [seq.shape[0] for seq in res[key]]   # 每个样本的长度
+
+        # 创建attention mask
         if not self.padding_free and seq_lens and ('input_ids' in res or 'inputs_embeds' in res):
             attention_mask_key = 'attention_mask_2d' if self.use_megatron else 'attention_mask'
             res[attention_mask_key] = [torch.ones(seq_len, dtype=torch.int64) for seq_len in seq_lens]
@@ -1827,6 +1914,7 @@ class Template(ProcessorMixin):
                     res['attention_mask'][i, :, :, seq_len:] = 0
                 res['attention_mask'] = ~res['attention_mask']
 
+        # 填充成一样长
         for key, pad_value in zip(keys, pad_values):
             if key not in res:
                 continue
@@ -1841,7 +1929,7 @@ class Template(ProcessorMixin):
             if key == 'position_ids' and res[key][0].ndim == 3:
                 res[key] = self._pad_3d_position_ids(res[key], pad_value)
             else:
-                res[key] = self._pad_sequence(res[key], pad_value)
+                res[key] = self._pad_sequence(res[key], pad_value)      # 补齐到当前batch最长的长度
 
         # multimodal
         res.update(self._data_collator_mm_data(batch))
@@ -1883,13 +1971,14 @@ class Template(ProcessorMixin):
 
         return result
 
-    # 被重写
+    # 被子类调用
     def _data_collator_mm_data(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         # multimodal
         res = {}
+        # 图像二进制 pt
         pixel_values = [b['pixel_values'] for b in batch if b.get('pixel_values') is not None]
         if len(pixel_values) > 0:
-            res['pixel_values'] = torch.concat(pixel_values)
+            res['pixel_values'] = torch.concat(pixel_values)        # 一个batch每个样本的所有图片连到一起
 
             image_sizes = [b['image_sizes'] for b in batch if b.get('image_sizes') is not None]
             if len(image_sizes) > 0:
@@ -2028,6 +2117,7 @@ class Template(ProcessorMixin):
         inputs['input_embedding_ranges'] = ranges
         inputs['input_ids'] = new_input_ids
 
+    # token序列补齐到一样长
     def _pad_sequence(self, sequences: List[torch.Tensor], padding_value: float = 0.) -> torch.Tensor:
         """Pad sequence by some side
 
@@ -2041,7 +2131,7 @@ class Template(ProcessorMixin):
         padding_side = self.padding_side if self.is_training else 'left'
         padding_right = padding_side == 'right'
         if padding_right:
-            return pad_sequence(sequences, batch_first=True, padding_value=padding_value)
+            return pad_sequence(sequences, batch_first=True, padding_value=padding_value)       # 补齐到最长的
 
         max_len = max([s.shape[0] for s in sequences])
 
@@ -2054,6 +2144,7 @@ class Template(ProcessorMixin):
 
         return torch.stack(padded_sequences)
 
+    # 展示样本用
     def safe_decode(self, input_ids: List[int], **kwargs) -> str:
         if isinstance(self, Template):
             tokenizer = self.tokenizer

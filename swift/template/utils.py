@@ -56,7 +56,7 @@ class StopWordsCriteria(StoppingCriteria):
             self.is_done[i] = is_finished
         return self.is_done
 
-
+# 寻找可能的数据类型
 def fetch_one(element: Union[Tuple, List, Set, Dict, Any], item_type: Optional[Type] = None) -> Any:
     if isinstance(element, (tuple, set, list)):
         for ele in element:
@@ -135,6 +135,7 @@ def _split_str_by_regex(text: str, regex_delimiters: List[str]) -> List[str]:
     return parts
 
 
+# 分隔符：内容 这种列表形式
 def split_str_parts_by(text: str, delimiters: List[str], regex_mode: bool = False) -> List[Dict[str, str]]:
     """Split the text field into parts.
 
@@ -166,6 +167,7 @@ def split_str_parts_by(text: str, delimiters: List[str], regex_mode: bool = Fals
     return res
 
 
+# 返回最后一个人类的发言在整个对话中的索引
 def get_last_user_round(messages):
     """Get the index of the last occurrence of user role"""
     for i in range(len(messages) - 1, -1, -1):

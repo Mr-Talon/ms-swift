@@ -107,6 +107,7 @@ def _check_path(path: str) -> Union[str, None]:
     MAX_PATH_HEURISTIC = 2000
     if len(path) > MAX_PATH_HEURISTIC:
         return
+    # 绝对路径
     if os.path.exists(path):
         return os.path.abspath(path)
     data = path

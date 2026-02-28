@@ -10,6 +10,7 @@ from .utils import calculate_loss_scale
 ALL_BASE_STRATEGY = ['default', 'last_round', 'all']
 
 
+# 不同对话部分的loss权重
 class LossScale:
     """Base class for loss scaling in training.
 
@@ -44,7 +45,7 @@ class LossScale:
         """
         if base_strategy not in ALL_BASE_STRATEGY:
             raise ValueError(f'ALL_BASE_STRATEGY: {ALL_BASE_STRATEGY}, base_strategy: {base_strategy}')
-        self.base_strategy = base_strategy
+        self.base_strategy = base_strategy      # default
 
     def get_loss_scale(self, context: str, **kwargs) -> Tuple[List[str], List[float]]:
         """Calculate loss scale for the given context.
@@ -89,16 +90,20 @@ class LossScale:
         res_context_list = []
         res_loss_scale = []
         i = 0
-        last_user_round = get_last_user_round(messages)
+        last_user_round = get_last_user_round(messages)     # 最后一个人类对话的id
+
         for context, context_type in zip(context_list, context_types):
             is_last_round = 2 * i >= last_user_round
             query, loss = None, None
+
             if context_type == ContextType.RESPONSE:
-                query = messages[2 * i]['content']
+                # ai回答部分
+                query = messages[2 * i]['content']          # 对应的人类问题
                 # Currently, we only support applying loss/mask to the response part.
-                loss = messages[2 * i + 1].get('loss')
+                loss = messages[2 * i + 1].get('loss')      # 目前没有loss
                 assert context == messages[2 * i + 1]['content']
                 i += 1
+
             if isinstance(context, dict) and 'loss_scale' in context:
                 new_context = [[token] for token in context['token_ids']]
                 loss_scale = context['loss_scale']
@@ -110,8 +115,10 @@ class LossScale:
                                                      (self.base_strategy == 'default' and is_assistant) or
                                                      (self.base_strategy == 'last_round' and is_assistant
                                                       and is_last_round)):
+                    # loss权重为none default ai回答 loss为1
                     new_context, loss_scale = self.get_loss_scale(context, query=query)
                 else:
+                    # 其他内容 系统提示、问题、EOS loss为0
                     new_context, loss_scale = [context], [0.]
             res_context_list += new_context
             res_loss_scale += loss_scale
@@ -124,6 +131,7 @@ class LossScale:
         return self.is_binary
 
 
+# 用不到 agent
 class ConfigLossScale(LossScale):
     """Loss scale class that loads configuration from a JSON file.
 

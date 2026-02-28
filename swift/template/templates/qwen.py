@@ -307,6 +307,7 @@ class Qwen2VLTemplate(Template):
         self.transformers_version = version.parse(transformers.__version__)
         self.bbox_format = get_env_args('QWENVL_BBOX_FORMAT', str, 'legacy')
 
+    # 文本中的image标签换成统一形式 预处理图片大小
     def replace_tag(self, media_type: Literal['image', 'video', 'audio'], index: int,
                     inputs: StdTemplateInputs) -> List[Context]:
         from qwen_vl_utils import fetch_image, fetch_video
@@ -501,8 +502,12 @@ register_template(
 class Qwen3VLTemplate(Qwen2VLTemplate):
     version = 'v3'
 
+    # 文本变成token id 为图像空出位置
     def _encode(self, inputs: StdTemplateInputs) -> Dict[str, Any]:
+        # 将文本变成token id
         encoded = Template._encode(self, inputs)
+
+        # 处理图片
         processor = self.processor
         input_ids = encoded['input_ids']
         labels = encoded['labels']
@@ -512,6 +517,7 @@ class Qwen3VLTemplate(Qwen2VLTemplate):
             if mm_data:
                 if media_type == 'images':
                     media_token = self.image_token_id
+                    # 图像二进制转pt
                     media_inputs = processor.image_processor(images=mm_data, return_tensors='pt', do_resize=False)
                     media_grid_thw = media_inputs['image_grid_thw']
                 else:
@@ -528,9 +534,10 @@ class Qwen3VLTemplate(Qwen2VLTemplate):
                     media_inputs.pop('attention_mask', None)
                     media_token = self.video_token_id
                 idx_list = findall(input_ids, media_token)
-                merge_length = processor.image_processor.merge_size**2
+                merge_length = processor.image_processor.merge_size**2          # 像素合并
 
                 def _get_new_tokens(i):
+                    # 提前给当前image设置token数的位置
                     if media_type == 'images':
                         token_len = (media_grid_thw[i].prod() // merge_length)
                         return [media_token] * token_len
@@ -546,6 +553,7 @@ class Qwen3VLTemplate(Qwen2VLTemplate):
         encoded['loss_scale'] = loss_scale
         return encoded
 
+    # 直接返回
     def _post_encode(self, model, inputs: Dict[str, Any]) -> Dict[str, Any]:
         return inputs
 

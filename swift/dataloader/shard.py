@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 from swift.utils import to_device
 
-
+# sampler  ddp 按卡切数据
 class BatchSamplerShard:
 
     def __init__(
@@ -52,8 +52,8 @@ class BatchSamplerShard:
                 total_idx = get_length_grouped_indices(
                     self.lengths, self.batch_size * self.world_size, generator=generator)
             else:
-                total_idx = torch.randperm(self.total_samples * self.world_size, generator=generator).tolist()
-            total_idx = total_idx[self.rank::self.world_size]
+                total_idx = torch.randperm(self.total_samples * self.world_size, generator=generator).tolist()  # 全局打乱
+            total_idx = total_idx[self.rank::self.world_size]       # 当前gpu
         else:
             total_idx = range(self.rank, self.total_samples * self.world_size, self.world_size)
 
@@ -78,6 +78,7 @@ class BatchSamplerShard:
             return (self.total_samples + self.batch_size - 1) // self.batch_size
 
 
+# dataloader
 class DataLoaderShard(DataLoader):
 
     def __init__(self, dataset, device=None, **dataloader_params):

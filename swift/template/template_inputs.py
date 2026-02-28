@@ -12,6 +12,7 @@ from .utils import Messages, Tool, get_last_user_round, messages_to_history
 logger = get_logger()
 
 
+# message可以包含的内容
 @dataclass
 class StdTemplateInputs:
     # only user/tool/assistant
@@ -132,6 +133,7 @@ class StdTemplateInputs:
         return res
 
 
+# 属性对应一个字典
 @dataclass
 class TemplateInputs:
     chosen: StdTemplateInputs  # or Dict[str, Any]
@@ -159,6 +161,7 @@ class TemplateInputs:
                     res.append(StdTemplateInputs.from_dict(kwargs))
                 setattr(self, key, res)
 
+    # DPO 用不到
     @staticmethod
     def _compat_rejected_response(inputs: Dict[str, Any]):
         if 'rejected_response' not in inputs:
@@ -185,25 +188,31 @@ class TemplateInputs:
             assert rejected_response != response, f'rejected_response: {rejected_response}, response: {response}'
         inputs['rejected_messages'] = deepcopy(messages[:idx]) + rejected_responses
 
+    # 字典转换为TemplateInputs格式
     @classmethod
     def from_dict(cls, inputs: Dict[str, Any]) -> 'TemplateInputs':
         inputs = deepcopy(inputs)
 
-        has_rejected_messages = inputs.get('rejected_messages') is not None
+        # DPO
+        has_rejected_messages = inputs.get('rejected_messages') is not None     # False
         cls._compat_rejected_response(inputs)
         kwargs = {}
         non_chosen_keys = ['rejected', 'positive', 'negative']
         for prefix in ['chosen'] + non_chosen_keys:
             if prefix == 'chosen':
+                # 常规的
                 std_inputs = {
                     k: v
                     for k, v in inputs.items() if not any(k.startswith(f'{p}_') for p in non_chosen_keys)
                 }
             else:
+                # DPO相关的
                 std_inputs = {k[len(f'{prefix}_'):]: v for k, v in inputs.items() if k.startswith(f'{prefix}_')}
+
             if std_inputs:
                 kwargs[prefix] = std_inputs
 
+        # DPO
         if not has_rejected_messages and kwargs.get('rejected') is not None:
             chosen = kwargs['chosen']
             rejected = kwargs['rejected']

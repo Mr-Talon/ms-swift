@@ -13,6 +13,7 @@ from ..media import MediaResource
 from ..preprocessor import GroundingMixin, MessagesPreprocessor, ResponsePreprocessor, RowPreprocessor
 from ..register import DatasetMeta, SubsetDataset, register_dataset
 
+# 公开数据集注册
 
 class ShareGPT4oPreprocessor(MessagesPreprocessor):
 

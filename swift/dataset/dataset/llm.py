@@ -12,6 +12,7 @@ from ..preprocessor import (AlpacaPreprocessor, ClsGenerationPreprocessor, ClsPr
                             ResponsePreprocessor, RowPreprocessor, TextGenerationPreprocessor)
 from ..register import DatasetMeta, SubsetDataset, register_dataset
 
+# 公开数据集注册
 
 class AlpacaZhPreprocessor(AlpacaPreprocessor):
 

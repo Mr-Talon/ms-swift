@@ -115,6 +115,7 @@ def per_token_loss_func(outputs, labels, enable_dft_loss: bool = False, **kwargs
     return loss
 
 
+# kwargs转args
 def _kwargs_to_args(func, args, kwargs) -> Optional[List[Any]]:
     parameters = inspect.signature(func).parameters
     args = list(args)
@@ -129,6 +130,7 @@ def _kwargs_to_args(func, args, kwargs) -> Optional[List[Any]]:
     return args
 
 
+# 增加梯度检查点
 def _add_gradient_checkpointing(module_list):
 
     requires_grad = None
@@ -142,12 +144,14 @@ def _add_gradient_checkpointing(module_list):
         if new_args is not None and self.gradient_checkpointing and self.training:
             if new_args and isinstance(new_args[0], torch.Tensor) and requires_grad and not new_args[0].requires_grad:
                 new_args[0].requires_grad_(True)
-            layer_ret = self._gradient_checkpointing_func(self.__old_forward, *new_args)
+            layer_ret = self._gradient_checkpointing_func(self.__old_forward, *new_args)        # 对__old_forward 前向只保存检查点
             logger.info_once('Successfully using dynamic gradient checkpointing.')
         else:
+            # 不启用检查点
             layer_ret = self.__old_forward(*args, **kwargs)
         return layer_ret
 
+    # 保存旧forward，替换新forward
     for module in module_list:
         module.gradient_checkpointing = False
         if hasattr(module, '_old_forward'):  # device_map
@@ -171,7 +175,8 @@ def find_module_list(model) -> Optional[nn.ModuleList]:
     if module_lists:
         return max(module_lists, key=lambda x: len(x))
 
-# 设置梯度检查点
+
+# 视觉和文本分别设置梯度检查点
 def dynamic_gradient_checkpointing(model, including_vit: bool = False) -> None:
     if isinstance(model, PeftModel):
         model = model.model

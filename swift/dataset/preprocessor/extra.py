@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from .core import ResponsePreprocessor
-
+# 为特定数据集定制的数据集处理方法
 
 class GroundingMixin:
     """This class offers prompts to the grounding task"""

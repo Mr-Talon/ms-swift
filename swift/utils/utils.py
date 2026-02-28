@@ -495,6 +495,7 @@ def shutdown_event_loop_in_daemon(thread: threading.Thread = None, loop: asyncio
     thread.join(timeout=5)
 
 
+# 去除最后一个ai的回答 用于推理
 def remove_response(messages) -> Optional[str]:
     """
     Removes and returns the content of the last message if its role is 'assistant'.
